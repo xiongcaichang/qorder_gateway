@@ -322,16 +322,18 @@ function verifyApiToken(req, res, next) {
 // Authentication Resolver
 // ============================================================================
 function resolveAuth(req) {
-  const apiAuthConfig = Database.getApiAuthConfig();
   const authHeader = req.headers.authorization || '';
   const apiKeyHeader = req.headers['x-api-key'] || '';
   const token = (apiKeyHeader || authHeader.replace(/^Bearer\s+/i, '')).trim();
-  
-  // If token is the local gateway API key or empty, use the configured server environment token
-  const isLocalGatewayKey = Boolean(token && token === apiAuthConfig.apiKey);
-  const isDefaultAuth = !token || isLocalGatewayKey;
-  const auth = isDefaultAuth ? accessTokenFromEnv() : accessTokenHelper(token);
-  return { auth, isDefaultAuth };
+
+  // If client explicitly provides a personal Qoder access token (pt-...)
+  if (token && token.startsWith('pt-')) {
+    return { auth: accessTokenHelper(token), isDefaultAuth: false };
+  }
+
+  // Otherwise (empty token, client placeholders like sk-..., or gateway API key),
+  // use server's configured environment token and enable WarmPool preheating!
+  return { auth: accessTokenFromEnv(), isDefaultAuth: true };
 }
 
 // ============================================================================
@@ -390,6 +392,28 @@ class WarmQueryPool {
     }
   }
 
+  async acquire(isDefaultAuth) {
+    if (!isDefaultAuth) return null;
+    if (this.pool.length > 0) {
+      const warm = this.pool.shift();
+      setTimeout(() => this.replenish(), 0);
+      return warm;
+    }
+    // If pool is momentarily empty, wait up to 1.5s for pending instances to be ready
+    if (this.pendingCount > 0) {
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (this.pool.length > 0) {
+          const warm = this.pool.shift();
+          setTimeout(() => this.replenish(), 0);
+          return warm;
+        }
+      }
+    }
+    this.replenish();
+    return null;
+  }
+
   getWarmInstance(isDefaultAuth) {
     if (!isDefaultAuth || this.pool.length === 0) {
       this.replenish();
@@ -421,7 +445,7 @@ const warmPool = new WarmQueryPool(2, 4);
 
 // Unified Query Execution Generator with Session Acquisition Callback
 async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAcquired }) {
-  const warm = warmPool.getWarmInstance(isDefaultAuth);
+  const warm = await warmPool.acquire(isDefaultAuth);
   if (warm) {
     onAcquired?.({ isWarm: true });
     console.log(`[exec] Using preheated session from WarmPool (model: ${modelKey})`);
@@ -437,18 +461,24 @@ async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAc
     }
   }
 
-  // Fallback to direct query
+  // Fallback to direct query with verified credentials
   onAcquired?.({ isWarm: false });
   console.log(`[exec] Executing direct query (model: ${modelKey})`);
-  yield* query({
-    prompt: promptStream,
-    options: {
-      auth,
-      model: modelKey,
-      tools: [],
-      persistSession: false,
-    },
-  });
+  const effectiveAuth = isDefaultAuth ? accessTokenFromEnv() : auth;
+  try {
+    yield* query({
+      prompt: promptStream,
+      options: {
+        auth: effectiveAuth,
+        model: modelKey,
+        tools: [],
+        persistSession: false,
+      },
+    });
+  } catch (err) {
+    console.error(`[exec] Direct query error (model: ${modelKey}):`, err.message);
+    throw err;
+  }
 }
 
 // Format OpenAI messages for SDK
