@@ -1,0 +1,53 @@
+# Node 依赖与构建输出
+node_modules/
+dist/
+build/
+
+# 日志文件
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# PM2 运行时与 PID 文件
+.pm2/
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# 环境变量与敏感凭据
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+
+# 本地运行时 SQLite 数据库文件 (保留结构)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+!data/.gitkeep
+
+# 操作系统与编辑器临时文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+PROJECT_STATUS.md

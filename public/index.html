@@ -1,0 +1,1976 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Qoder API Gateway — OpenAI & Anthropic 代理控制台</title>
+  <style>
+    /* ==========================================================================
+       Pure Vanilla CSS (100% Local, Zero External CDN / Google Fonts Dependencies)
+       ========================================================================== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --primary-light: #eef2ff;
+      --primary-border: #c7d2fe;
+      --accent: #10b981;
+      --accent-light: #ecfdf5;
+      --accent-border: #a7f3d0;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --border: #e2e8f0;
+      --border-light: #f1f5f9;
+      --radius-lg: 16px;
+      --radius-md: 10px;
+      --radius-sm: 6px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Code & Pre */
+    code, pre { font-family: var(--font-mono); }
+
+    /* Login Page */
+    .login-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #f1f5f9 0%, #e0e7ff 50%, #f8fafc 100%);
+    }
+    .login-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 420px;
+    }
+    .login-header { text-align: center; margin-bottom: 28px; }
+    .brand-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--primary-light);
+      color: var(--primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .login-title { font-size: 22px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; }
+    .login-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    .form-group { margin-bottom: 18px; }
+    .form-label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .form-input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: #ffffff;
+      color: var(--text);
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    }
+    .btn-primary {
+      width: 100%;
+      padding: 11px 16px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .alert-error {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    /* Top Navigation Layout */
+    .dashboard-layout { display: none; min-height: 100vh; flex-direction: column; }
+    .dashboard-layout.active { display: flex; }
+
+    .top-header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      box-shadow: var(--shadow-sm);
+    }
+    .header-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 20px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand-area { display: flex; align-items: center; gap: 12px; }
+    .brand-badge {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .brand-name { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.2; }
+    .brand-desc { font-size: 11px; color: var(--text-dim); }
+
+    .nav-tabs-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-light);
+    }
+    .nav-tab-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .nav-tab-btn:hover { color: var(--text); }
+    .nav-tab-btn.active {
+      background: #ffffff;
+      color: var(--primary);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    
+    /* Warm Pool Popover */
+    .pool-popover-wrapper {
+      position: relative;
+      display: inline-block;
+      cursor: pointer;
+    }
+    .pool-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background: var(--accent-light);
+      border: 1px solid var(--accent-border);
+      color: #065f46;
+      font-size: 11px;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .pool-status-pill:hover {
+      background: #a7f3d0;
+      box-shadow: 0 2px 8px rgba(5, 150, 105, 0.15);
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulseDot 2s infinite;
+    }
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.15); }
+    }
+
+    .pool-popover-menu {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 8px;
+      width: 340px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.12), 0 4px 10px -2px rgba(0, 0, 0, 0.06);
+      padding: 16px;
+      z-index: 300;
+      pointer-events: auto;
+      text-align: left;
+    }
+    .pool-popover-wrapper:hover .pool-popover-menu,
+    .pool-popover-wrapper:focus-within .pool-popover-menu {
+      display: block;
+      animation: fadeInPopover 0.18s ease-out;
+    }
+    @keyframes fadeInPopover {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .pool-popover-head { padding-bottom: 10px; border-bottom: 1px solid var(--border-light); }
+    .pool-model-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 12px 0;
+      max-height: 180px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .pool-model-tag {
+      background: #f8fafc;
+      color: #334155;
+      border: 1px solid #e2e8f0;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pool-popover-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #64748b;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-light);
+    }
+
+    .token-link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: var(--primary-light);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .token-link-btn:hover { background: #e0e7ff; }
+
+    .user-pill {
+      padding: 4px 10px;
+      border-radius: 8px;
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: #334155;
+      white-space: nowrap;
+    }
+    .btn-logout {
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .btn-logout:hover { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+
+    /* Security Warning Banner */
+    .security-warning-banner {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 3px rgba(217, 119, 6, 0.06);
+    }
+    .security-warning-banner strong { color: #b45309; }
+    .security-warning-banner div { font-size: 13px; color: #92400e; line-height: 1.5; }
+    .btn-warning-action {
+      background: #d97706;
+      color: #ffffff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-warning-action:hover { background: #b45309; }
+
+    /* Footer */
+    .app-footer {
+      margin-top: 40px;
+      padding: 22px 0 30px;
+      border-top: 1px solid var(--border-light);
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .footer-divider { color: var(--border); }
+    .footer-link {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+      transition: color 0.15s;
+    }
+    .footer-link:hover { color: #3730a3; text-decoration: underline; }
+
+    /* Main Container */
+    .main-body {
+      max-width: 1280px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 20px;
+      flex: 1;
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Banner */
+    .guide-banner {
+      background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+      color: #ffffff;
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.2);
+    }
+    .banner-text h3 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .banner-text p { font-size: 12px; color: #e0e7ff; line-height: 1.6; max-width: 760px; }
+    .banner-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #ffffff;
+      color: var(--primary);
+      text-decoration: none;
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      box-shadow: var(--shadow-sm);
+      white-space: nowrap;
+      transition: transform 0.1s;
+    }
+    .banner-btn:hover { transform: translateY(-1px); }
+
+    /* Metric Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-sm);
+    }
+    .stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .stat-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+    .stat-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--primary-light);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .stat-num { font-size: 24px; font-weight: 700; color: var(--text); }
+    .stat-desc { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+    /* Cards */
+    .card-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 24px;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-light);
+      margin-bottom: 16px;
+    }
+    .card-title { font-size: 15px; font-weight: 700; color: var(--text); }
+
+    /* Code snippet blocks */
+    .snippet-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 16px;
+    }
+    .snippet-card {
+      background: #0f172a;
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      color: #e2e8f0;
+      position: relative;
+    }
+    .snippet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e293b;
+      margin-bottom: 10px;
+    }
+    .snippet-title { font-size: 11px; font-weight: 600; color: #818cf8; }
+    .snippet-copy {
+      background: #1e293b;
+      color: #cbd5e1;
+      border: 1px solid #334155;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .snippet-copy:hover { background: #334155; color: #ffffff; }
+    .snippet-code {
+      font-size: 11px;
+      line-height: 1.6;
+      color: #cbd5e1;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* Table */
+    .table-container {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+    thead { background: #f8fafc; }
+    th { padding: 12px 16px; color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+    td { padding: 12px 16px; border-bottom: 1px solid var(--border-light); }
+    tbody tr:hover { background: #f8fafc; }
+    .tag-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+    .tag-default { background: var(--primary-light); color: var(--primary); border: 1px solid var(--primary-border); }
+    .tag-vl { background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+
+    /* Playground / Test layout */
+    .test-columns {
+      display: grid;
+      grid-template-columns: 1fr 1.3fr;
+      gap: 20px;
+      min-height: 520px;
+    }
+    @media (max-width: 900px) {
+      .test-columns { grid-template-columns: 1fr; }
+    }
+    .output-console {
+      background: #0f172a;
+      border-radius: var(--radius-md);
+      padding: 16px;
+      color: #e2e8f0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.7;
+      min-height: 380px;
+      max-height: 520px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .output-console:empty::before {
+      content: '等待发起测试请求...';
+      color: #64748b;
+      font-style: italic;
+    }
+    .thinking-box {
+      color: #94a3b8;
+      border-left: 3px solid #6366f1;
+      padding-left: 10px;
+      margin-bottom: 8px;
+      font-style: italic;
+    }
+
+    /* Diagnostics Rows */
+    .diag-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border-light);
+      font-size: 13px;
+    }
+    .diag-row:last-child { border-bottom: none; }
+    .diag-key { color: var(--text-muted); font-weight: 500; }
+    .diag-val { font-family: var(--font-mono); font-weight: 600; color: var(--text); word-break: break-all; }
+
+    /* ==========================================================================
+       Responsive Media Queries for Narrow Windows & Mobile Devices (<860px / <480px)
+       ========================================================================== */
+    @media (max-width: 860px) {
+      .header-inner {
+        height: auto;
+        flex-wrap: wrap;
+        padding: 10px 14px;
+        gap: 10px;
+      }
+      .brand-area {
+        order: 1;
+      }
+      .header-right {
+        order: 2;
+        gap: 8px;
+      }
+      .token-link-btn {
+        display: none; /* Hide button in tight header, accessible inside tab */
+      }
+      .nav-tabs-wrapper {
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        justify-content: flex-start;
+        padding: 3px;
+      }
+      .nav-tab-btn {
+        white-space: nowrap;
+        flex: 1;
+        text-align: center;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+      .main-body {
+        padding: 14px 12px;
+      }
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+      .stat-box {
+        padding: 14px;
+      }
+      .stat-num {
+        font-size: 20px;
+      }
+      .guide-banner {
+        padding: 16px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .banner-btn {
+        justify-content: center;
+        width: 100%;
+      }
+      .snippet-grid {
+        grid-template-columns: 1fr;
+      }
+      .card-panel {
+        padding: 16px 14px;
+        margin-bottom: 16px;
+      }
+      .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .card-header > div:last-child {
+        width: 100%;
+      }
+      .test-columns {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+      .table-container {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      table {
+        min-width: 580px;
+      }
+      .diag-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        padding: 10px 0;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .brand-desc {
+        display: none;
+      }
+      .brand-name {
+        font-size: 15px;
+      }
+      .brand-badge {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+      }
+      .pool-status-pill {
+        font-size: 10px;
+        padding: 3px 8px;
+      }
+      .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .nav-tab-btn {
+        font-size: 11px;
+        padding: 6px 8px;
+      }
+      .login-card {
+        padding: 24px 18px;
+        border-radius: var(--radius-md);
+      }
+      .output-console {
+        min-height: 220px;
+        max-height: 380px;
+        font-size: 11px;
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===================================================================== -->
+  <!-- 登录页面 (Login)                                                     -->
+  <!-- ===================================================================== -->
+  <div id="loginPage" class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="brand-icon">⚡</div>
+        <h1 class="login-title">Qoder API Gateway</h1>
+        <p class="login-subtitle">OpenAI & Anthropic 双协议加速代理网关</p>
+      </div>
+
+      <div id="loginError" class="alert-error"></div>
+
+      <form id="loginForm" onsubmit="return doLogin(event)">
+        <div class="form-group">
+          <label class="form-label">控制台账号</label>
+          <input type="text" id="username" value="admin" required autocomplete="username" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label">控制台密码</label>
+          <input type="password" id="password" value="admin" required autocomplete="current-password" class="form-input">
+        </div>
+        <button type="submit" id="loginBtn" class="btn-primary" style="margin-top: 4px;">登录管理控制台</button>
+      </form>
+
+      <div id="loginDefaultAccountHint" style="margin-top: 24px; pt: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); text-align: center; line-height: 1.6;">
+        默认账号: <code style="background: #f1f5f9; color: var(--primary); padding: 2px 6px; border-radius: 4px;">admin</code> · 
+        默认密码: <code style="background: #f1f5f9; color: var(--primary); padding: 2px 6px; border-radius: 4px;">admin</code><br>
+        Qoder 令牌可前往 <a href="https://qoder.com/account/integrations" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: 600;">官方 Integrations</a> 获取
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 仪表盘主界面 (Dashboard with Top Navigation)                           -->
+  <!-- ===================================================================== -->
+  <div id="dashboard" class="dashboard-layout">
+    
+    <!-- 顶部导航栏 (Top Navigation Header) -->
+    <header class="top-header">
+      <div class="header-inner">
+        <!-- Logo & Brand -->
+        <div class="brand-area">
+          <div class="brand-badge">⚡</div>
+          <div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="brand-name">Qoder Proxy</span>
+              <span style="font-size: 10px; font-weight: 700; background: var(--primary-light); color: var(--primary); border: 1px solid var(--primary-border); padding: 1px 6px; border-radius: 12px;">双协议</span>
+            </div>
+            <div class="brand-desc">OpenAI & Anthropic 代理网关</div>
+          </div>
+        </div>
+
+        <!-- 顶部导航 Tab 菜单 -->
+        <nav class="nav-tabs-wrapper">
+          <button class="nav-tab-btn active" data-tab="models" onclick="switchTab('models')">
+            📋 模型列表 & 接入
+          </button>
+          <button class="nav-tab-btn" data-tab="test" onclick="switchTab('test')">
+            🧪 在线调试工作台
+          </button>
+          <button class="nav-tab-btn" data-tab="settings" onclick="switchTab('settings')">
+            ⚙️ 系统配置 & Token
+          </button>
+        </nav>
+
+        <!-- 状态与退出 -->
+        <div class="header-right">
+          <!-- 预热池悬停浮层 -->
+          <div class="pool-popover-wrapper">
+            <div class="pool-status-pill" id="poolStatusPill">
+              <span class="status-dot"></span>
+              <span id="poolHeaderBadge">预热池就绪 (TTFB ~5s)</span>
+              <span style="font-size: 9px; opacity: 0.7;">▼</span>
+            </div>
+
+            <div class="pool-popover-menu" id="poolPopoverMenu">
+              <div class="pool-popover-head">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <span style="font-size: 13px; font-weight: 700; color: #0f172a;">⚡ 预热加速池 (WarmPool)</span>
+                  <span id="poolInstanceBadge" class="tag-badge" style="background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;">2 实例待命</span>
+                </div>
+                <p style="font-size: 11px; color: #64748b; margin-top: 5px; line-height: 1.5;">
+                  后台常驻预热 Worker 会话，无需进程启动握手（消除 8.5s 延迟），已为以下模型全量就绪：
+                </p>
+              </div>
+              <div class="pool-model-tags" id="poolModelTags">
+                <span class="pool-model-tag">⚡ MiniMax-M3</span>
+                <span class="pool-model-tag">⚡ DeepSeek-V3</span>
+                <span class="pool-model-tag">⚡ GLM-4-Plus</span>
+                <span class="pool-model-tag">⚡ Qwen-2.5-Coder-32B</span>
+                <span class="pool-model-tag">⚡ Kimi-K2</span>
+                <span class="pool-model-tag">⚡ Claude-3.5-Sonnet</span>
+              </div>
+              <div class="pool-popover-foot">
+                <span>🚀 首字 TTFB: <strong style="color: #059669;">~5.1s (-72%)</strong></span>
+                <span>动态切模: <strong style="color: #4f46e5;">0ms</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <a href="https://qoder.com/account/integrations" target="_blank" class="token-link-btn">
+            <span>获取 Token</span>
+            <span style="font-size: 10px;">↗</span>
+          </a>
+
+          <span id="userBadge" class="user-pill">admin</span>
+          <button onclick="doLogout()" class="btn-logout">退出</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main-body">
+
+      <!-- 密码未修改顶部安全引导警告条 (若为初始密码 admin 时显示) -->
+      <div id="securityAlertBanner" class="security-warning-banner" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">⚠️</span>
+          <div>
+            <strong>安全提醒：</strong> 检测到当前正在使用初始默认管理员密码（<code>admin / admin</code>），存在被他人未经授权访问的风险，建议尽快修改！
+          </div>
+        </div>
+        <button onclick="goToChangePassword()" class="btn-warning-action">立即修改密码 →</button>
+      </div>
+
+      <!-- ================================================================= -->
+      <!-- Tab 1: 模型列表与快速接入 (Models & Integration)                  -->
+      <!-- ================================================================= -->
+      <section id="tab-models" class="tab-content active">
+        
+        <!-- 引导横幅: 官方 Token 获取引导 (未配置 Token 时才显示) -->
+        <div id="tokenBanner" class="guide-banner" style="display: none;">
+          <div class="banner-text">
+            <h3>🔑 还没有配置 Qoder 个人访问令牌 (Token)？</h3>
+            <p>本服务需要 Qoder 访问令牌与 16+ 个官方模型进行安全通信。前往 Qoder 官方平台并在 Integrations 页面生成 Personal Access Token，填入 <code>.env</code> 文件即可生效。</p>
+          </div>
+          <a href="https://qoder.com/account/integrations" target="_blank" class="banner-btn">
+            前往官方获取 Token ↗
+          </a>
+        </div>
+
+        <!-- 4 核心指标 -->
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-top">
+              <span class="stat-label">可用模型总数</span>
+              <div class="stat-icon">🤖</div>
+            </div>
+            <div id="statTotal" class="stat-num">--</div>
+            <div class="stat-desc">动态发现 · 1h 缓存自动刷新</div>
+          </div>
+
+          <div class="stat-box">
+            <div class="stat-top">
+              <span class="stat-label">预热加速池状态</span>
+              <div class="stat-icon" style="background: var(--accent-light); color: var(--accent);">⚡</div>
+            </div>
+            <div id="statPool" class="stat-num" style="color: #059669;">已就绪</div>
+            <div class="stat-desc" style="color: #047857;">TTFB 首字延迟削减 72% (~5s)</div>
+          </div>
+
+          <div class="stat-box">
+            <div class="stat-top">
+              <span class="stat-label">视觉多模态 (VL)</span>
+              <div class="stat-icon" style="background: #f3e8ff; color: #7e22ce;">👁️</div>
+            </div>
+            <div id="statVL" class="stat-num" style="color: #7e22ce;">--</div>
+            <div class="stat-desc">支持图像与多模态输入</div>
+          </div>
+
+          <div class="stat-box">
+            <div class="stat-top">
+              <span class="stat-label">最大上下文窗口</span>
+              <div class="stat-icon" style="background: #fef3c7; color: #d97706;">📚</div>
+            </div>
+            <div id="statContext" class="stat-num">--</div>
+            <div class="stat-desc">支持超长长文本上下文</div>
+          </div>
+        </div>
+
+        <!-- 客户端接入代码指南 -->
+        <div class="card-panel">
+          <div class="card-header">
+            <div class="card-title">🚀 客户端调用接入指南 (支持 OpenAI & Anthropic 双协议)</div>
+            <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">http://127.0.0.1:10088</span>
+          </div>
+
+          <div class="snippet-grid">
+            <div class="snippet-card">
+              <div class="snippet-head">
+                <span class="snippet-title">1. OpenAI 格式 (/v1/chat/completions)</span>
+                <button onclick="copyCode(this)" class="snippet-copy">复制</button>
+              </div>
+              <pre class="snippet-code">curl -N http://127.0.0.1:10088/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "MiniMax-M3",
+    "messages": [{"role": "user", "content": "1+1=?"}],
+    "stream": true
+  }'</pre>
+            </div>
+
+            <div class="snippet-card">
+              <div class="snippet-head">
+                <span class="snippet-title" style="color: #38bdf8;">2. Anthropic 格式 (/v1/messages)</span>
+                <button onclick="copyCode(this)" class="snippet-copy">复制</button>
+              </div>
+              <pre class="snippet-code">curl -N http://127.0.0.1:10088/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-token-if-configured" \
+  -d '{
+    "model": "MiniMax-M3",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "1+1=?"}],
+    "stream": true
+  }'</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- 模型列表表格 -->
+        <div class="card-panel">
+          <div class="card-header">
+            <div class="card-title">📋 动态模型注册表</div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; width: 100%; max-width: 360px;">
+              <input type="text" id="searchInput" placeholder="搜索模型 (名称 / sdk_value / 描述)..." oninput="filterModels()" class="form-input" style="flex: 1; min-width: 150px; padding: 6px 12px; font-size: 12px;">
+              <button onclick="loadModels(true)" class="btn-primary" style="width: auto; padding: 6px 14px; font-size: 12px; white-space: nowrap;">🔄 刷新</button>
+            </div>
+          </div>
+
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>模型 ID (displayName)</th>
+                  <th>SDK Value</th>
+                  <th>功能与描述</th>
+                  <th>上下文</th>
+                  <th>视觉</th>
+                  <th>价格系数</th>
+                </tr>
+              </thead>
+              <tbody id="modelTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- Tab 2: 在线调试工作台 (Playground / Testing)                      -->
+      <!-- ================================================================= -->
+      <section id="tab-test" class="tab-content">
+        <div class="test-columns">
+          
+          <!-- 左侧参数配置 -->
+          <div class="card-panel" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div class="card-header">
+                <div class="card-title">🧪 请求参数配置</div>
+                <span style="font-size: 11px; color: var(--text-dim);">实时 API 调试</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">API 协议格式</label>
+                <select id="testProtocol" class="form-input">
+                  <option value="openai">OpenAI 协议 (/v1/chat/completions)</option>
+                  <option value="anthropic">Anthropic 协议 (/v1/messages)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">目标模型 (Model)</label>
+                <select id="testModel" onchange="updateDocSnippets()" class="form-input"></select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Prompt / 用户提问</label>
+                <textarea id="testPrompt" rows="6" placeholder="输入你想测试的问题..." class="form-input" style="resize: vertical; font-family: var(--font-mono);">一句话回答: 1+1=?</textarea>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px; padding: 10px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-light);">
+                <input type="checkbox" id="testStream" checked style="cursor: pointer;">
+                <label for="testStream" style="font-size: 12px; font-weight: 500; cursor: pointer;">
+                  开启 SSE 流式输出 (实时打字效果)
+                </label>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px; pt: 14px; border-top: 1px solid var(--border-light);">
+              <button id="btnTest" onclick="runTest()" class="btn-primary" style="flex: 1;">🚀 发送测试请求</button>
+              <button onclick="clearOutput()" class="btn-logout" style="padding: 10px 16px; font-weight: 600;">清空</button>
+            </div>
+          </div>
+
+          <!-- 右侧控制台输出 -->
+          <div class="card-panel" style="margin-bottom: 0; display: flex; flex-direction: column;">
+            <div class="card-header">
+              <div class="card-title">📥 实时响应结果</div>
+              <span id="responseStatus" style="font-size: 11px; font-family: var(--font-mono); color: var(--text-dim);">等待请求</span>
+            </div>
+
+            <div id="testOutput" class="output-console"></div>
+
+            <!-- 性能指标统计面板 (是否预热过 / 首字响应TTFB / 完整耗时) -->
+            <div id="perfMetricsBar" style="display: none; margin-top: 12px; padding: 12px 14px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-light); grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;">
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">⚡ 预热加速状态</span>
+                <span id="perfIsWarm" style="font-size: 13px; font-weight: 700; color: #059669;">--</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">⏱️ 首字响应时间 (TTFB)</span>
+                <span id="perfTtfb" style="font-size: 13px; font-weight: 700; font-family: var(--font-mono); color: #4f46e5;">--</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">⏳ 完整响应耗时 (Total)</span>
+                <span id="perfDuration" style="font-size: 13px; font-weight: 700; font-family: var(--font-mono); color: #0f172a;">--</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部动态接入代码文档 (左右分栏: OpenAI & Anthropic) -->
+        <div class="card-panel" style="margin-top: 20px;">
+          <div class="card-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="card-title">📖 当前选中模型接入文档</div>
+              <span id="docModelBadge" style="font-family: var(--font-mono); font-size: 12px; background: var(--primary-light); color: var(--primary); border: 1px solid var(--primary-border); padding: 2px 8px; border-radius: 6px; font-weight: 700;">--</span>
+            </div>
+            <span style="font-size: 11px; color: var(--text-muted);">自动根据上方所选模型实时生成调用代码</span>
+          </div>
+
+          <!-- 左右分栏 -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
+            
+            <!-- 左栏: OpenAI 协议接入 -->
+            <div class="snippet-card">
+              <div class="snippet-head">
+                <span class="snippet-title">1. OpenAI 格式接入 (/v1/chat/completions)</span>
+                <button onclick="copyCode(this)" class="snippet-copy">复制 cURL</button>
+              </div>
+              <pre id="docOpenAiCode" class="snippet-code"></pre>
+              
+              <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8;">
+                <span>客户端 Base URL: <code>http://127.0.0.1:10088/v1</code></span>
+                <button onclick="copyDocText('http://127.0.0.1:10088/v1', this)" class="snippet-copy" style="font-size: 9px; padding: 2px 6px;">复制 BaseURL</button>
+              </div>
+            </div>
+
+            <!-- 右栏: Anthropic 协议接入 -->
+            <div class="snippet-card">
+              <div class="snippet-head">
+                <span class="snippet-title" style="color: #38bdf8;">2. Anthropic 格式接入 (/v1/messages)</span>
+                <button onclick="copyCode(this)" class="snippet-copy">复制 cURL</button>
+              </div>
+              <pre id="docAnthropicCode" class="snippet-code"></pre>
+
+              <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8;">
+                <span>Anthropic Base URL: <code>http://127.0.0.1:10088</code></span>
+                <button onclick="copyDocText('http://127.0.0.1:10088', this)" class="snippet-copy" style="font-size: 9px; padding: 2px 6px;">复制 BaseURL</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- Tab 3: 系统配置与环境 (Settings & Environment)                    -->
+      <!-- ================================================================= -->
+      <section id="tab-settings" class="tab-content">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px;">
+          
+          <!-- Token 与环境配置 -->
+          <div class="card-panel" style="margin-bottom: 0;">
+            <div class="card-header">
+              <div class="card-title">🔑 访问令牌与环境变量配置</div>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+              系统启动时将自动加载 <code>.env</code> 文件中配置的凭据。
+            </p>
+
+            <div class="diag-row">
+              <span class="diag-key">当前 Token 状态</span>
+              <span id="sysTokenStatus" class="diag-val" style="color: var(--primary);">检测中...</span>
+            </div>
+            <div class="diag-row">
+              <span class="diag-key">官方 Token 获取链接</span>
+              <a href="https://qoder.com/account/integrations" target="_blank" class="diag-val" style="color: var(--primary); text-decoration: none;">
+                https://qoder.com/account/integrations ↗
+              </a>
+            </div>
+            <div class="diag-row">
+              <span class="diag-key">服务监听地址</span>
+              <span id="sysAddress" class="diag-val">127.0.0.1:10088</span>
+            </div>
+            <div class="diag-row">
+              <span class="diag-key">运行状态 / Node 版本</span>
+              <span id="sysUptime" class="diag-val">--</span>
+            </div>
+
+            <div style="margin-top: 18px; font-size: 12px; color: var(--text-muted);">
+              <strong>.env 快速配置指令:</strong>
+              <div class="snippet-card" style="margin-top: 8px;">
+                <pre class="snippet-code"># 1. 复制配置模板
+cp .env.example .env
+
+# 2. 编辑并填入你在 https://qoder.com/account/integrations 获取的 Token
+QODER_PERSONAL_ACCESS_TOKEN=pt-xxxxxxxx...
+
+# 3. 热重启服务生效
+./start.sh</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 客户端 API 访问令牌认证 (API Token Auth) -->
+          <div class="card-panel" style="margin-bottom: 0;">
+            <div class="card-header">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="card-title">🔐 客户端 API 访问令牌认证 (API Auth)</div>
+                <span id="apiAuthStatusBadge" class="tag-badge" style="background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;">已关闭</span>
+              </div>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+              开启后，第三方客户端调用 <code>/v1/chat/completions</code>、<code>/v1/messages</code>、<code>/v1/models</code> 时必须携带该 Token 鉴权。默认处于关闭状态（免密调用）。
+            </p>
+
+            <div id="apiAuthMsg" class="alert-error"></div>
+
+            <div style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-light);">
+              <label for="apiAuthToggle" style="font-size: 13px; font-weight: 600; color: #1e293b; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="apiAuthToggle" style="width: 16px; height: 16px; cursor: pointer;" onchange="toggleApiAuthSwitch(this.checked)">
+                <span>开启客户端 API 访问令牌认证</span>
+              </label>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; padding-left: 24px;">
+                客户端请求需附带 <code>Authorization: Bearer &lt;Token&gt;</code> 或 <code>x-api-key: &lt;Token&gt;</code>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">当前 API 访问令牌 (API Key)</label>
+              <div style="display: flex; gap: 8px;">
+                <input type="text" id="apiKeyValue" readonly class="form-input" style="font-family: var(--font-mono); font-size: 12px; background: #f8fafc; color: #1e293b; font-weight: 600;">
+                <button type="button" onclick="copyApiKeyValue(this)" class="btn-primary" style="width: auto; padding: 0 16px; font-size: 12px; white-space: nowrap;">📋 复制</button>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap;">
+              <button type="button" id="btnRegenApiKey" onclick="regenerateApiKey()" class="btn-logout" style="padding: 8px 14px; font-weight: 600; color: #4f46e5; border-color: #c7d2fe; background: #eef2ff;">
+                🔄 重新生成 Token
+              </button>
+              <button type="button" id="btnSaveApiAuth" onclick="saveApiAuthConfig()" class="btn-primary" style="width: auto; padding: 8px 18px;">
+                💾 保存并应用设置
+              </button>
+            </div>
+          </div>
+
+          <!-- 控制台改密码 -->
+          <div class="card-panel" style="margin-bottom: 0;">
+            <div class="card-header">
+              <div class="card-title">🔒 修改 Web 管理员密码</div>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+              修改登录当前 Web 控制台的密码 (服务端 MD5 加密存储)。
+            </p>
+
+            <div id="pwdMsg" class="alert-error"></div>
+
+            <form onsubmit="return doChangePwd(event)">
+              <div class="form-group">
+                <label class="form-label">当前旧密码</label>
+                <input type="password" id="oldPassword" required autocomplete="current-password" class="form-input">
+              </div>
+              <div class="form-group">
+                <label class="form-label">新密码 (至少 3 位)</label>
+                <input type="password" id="newPassword" required minlength="3" autocomplete="new-password" class="form-input">
+              </div>
+              <div class="form-group">
+                <label class="form-label">再次输入新密码</label>
+                <input type="password" id="confirmPassword" required minlength="3" autocomplete="new-password" class="form-input">
+              </div>
+              <button type="submit" id="btnChangePwd" class="btn-primary" style="width: auto; padding: 9px 20px;">保存修改</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 底部作者版权与博客链接 (Footer) -->
+    <footer class="app-footer">
+      <div class="footer-inner">
+        <span>© 2026 Qoder Proxy Gateway · Node.js & SQLite 原生极速驱动</span>
+        <span class="footer-divider">|</span>
+        <span>作者博客: <a href="https://bearnote.fun/" target="_blank" class="footer-link">https://bearnote.fun/ ↗</a></span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- JavaScript Client Logic (Zero External Dependencies)                  -->
+  <!-- ===================================================================== -->
+  <script>
+    let allModels = [];
+    let isLoadingModels = false;
+
+    function $(id) { return document.getElementById(id); }
+    function showError(msg) {
+      const el = $('loginError');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+    function hideError() { $('loginError').style.display = 'none'; }
+
+    function copyCode(btn) {
+      const pre = btn.closest('.snippet-card').querySelector('pre');
+      navigator.clipboard.writeText(pre.innerText.trim()).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '已复制!';
+        btn.style.color = '#34d399';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.color = '';
+        }, 2000);
+      });
+    }
+
+    // ================== 用户认证 (Auth) ==================
+    async function doLogin(e) {
+      e.preventDefault();
+      hideError();
+      const btn = $('loginBtn');
+      const username = $('username').value.trim();
+      const password = $('password').value;
+      btn.disabled = true;
+      btn.innerHTML = '正在登录...';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const j = await r.json();
+        if (!j.success) {
+          showError(j.message || `登录失败 (HTTP ${r.status})`);
+          return;
+        }
+        enterDashboard(j.username);
+      } catch (err) {
+        showError('网络异常: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '登录管理控制台';
+      }
+    }
+
+    async function checkSession() {
+      try {
+        const r = await fetch('/api/me');
+        if (r.ok) {
+          const j = await r.json();
+          enterDashboard(j.username);
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    }
+
+    function enterDashboard(username) {
+      const lp = $('loginPage');
+      const db = $('dashboard');
+      const ub = $('userBadge');
+      if (lp) lp.style.display = 'none';
+      if (db) db.classList.add('active');
+      if (ub) ub.textContent = username;
+      loadModels();
+      fetchSystemInfo();
+    }
+
+    async function doLogout() {
+      if (!confirm('确定要退出当前账号吗?')) return;
+      await fetch('/api/logout', { method: 'POST' });
+      location.reload();
+    }
+
+    let currentApiAuth = { enabled: false, apiKey: '' };
+    let isDefaultPassword = true;
+
+    function renderPoolModels(models) {
+      const container = $('poolModelTags');
+      if (!container || !models || !models.length) return;
+      container.innerHTML = models.map(name => `<span class="pool-model-tag">⚡ ${name}</span>`).join('');
+    }
+
+    function goToChangePassword() {
+      switchTab('settings');
+      setTimeout(() => {
+        const el = $('oldPassword');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.focus();
+        }
+      }, 150);
+    }
+
+    function applyPasswordState(isDefault) {
+      const hint = $('loginDefaultAccountHint');
+      const banner = $('securityAlertBanner');
+      const userInp = $('username');
+      const pwdInp = $('password');
+
+      if (hint) {
+        hint.style.display = isDefault ? 'block' : 'none';
+      }
+
+      if (!isDefault) {
+        if (userInp && userInp.value === 'admin') userInp.value = '';
+        if (pwdInp && pwdInp.value === 'admin') pwdInp.value = '';
+        if (userInp) userInp.placeholder = '请输入管理员账号';
+        if (pwdInp) pwdInp.placeholder = '请输入管理员密码';
+      }
+
+      if (banner) {
+        const isDashboardActive = $('dashboard')?.classList.contains('active');
+        banner.style.display = (isDashboardActive && isDefault) ? 'flex' : 'none';
+      }
+    }
+
+    async function fetchSystemInfo() {
+      try {
+        const r = await fetch('/api/system-info');
+        if (r.ok) {
+          const j = await r.json();
+          $('sysTokenStatus').textContent = j.token_configured ? `已就绪 (${j.token_masked})` : '未配置 (请设置 .env)';
+          $('sysAddress').textContent = `${j.host}:${j.port}`;
+          $('sysUptime').textContent = `${j.uptime_seconds}s (Node ${j.node_version})`;
+          
+          // Conditionally show/hide Token guidance banner
+          const banner = $('tokenBanner');
+          if (banner) {
+            banner.style.display = j.token_configured ? 'none' : 'flex';
+          }
+
+          if (j.pool_stats) {
+            $('poolHeaderBadge').textContent = `预热池: 空闲 ${j.pool_stats.idleCount} / ${j.pool_stats.targetSize}`;
+            $('statPool').textContent = `${j.pool_stats.idleCount} 实例就绪`;
+            const badge = $('poolInstanceBadge');
+            if (badge) badge.textContent = `${j.pool_stats.idleCount} 实例待命`;
+          }
+
+          if (j.warm_models && j.warm_models.length > 0) {
+            renderPoolModels(j.warm_models);
+          }
+
+          // Handle default password status
+          if (typeof j.is_default_password === 'boolean') {
+            isDefaultPassword = j.is_default_password;
+            applyPasswordState(isDefaultPassword);
+          }
+
+          if (j.api_auth) {
+            currentApiAuth = j.api_auth;
+            updateApiAuthUI();
+          }
+        }
+      } catch (e) {}
+    }
+
+    function updateApiAuthUI() {
+      const toggle = $('apiAuthToggle');
+      const keyInput = $('apiKeyValue');
+      const badge = $('apiAuthStatusBadge');
+      if (toggle) toggle.checked = Boolean(currentApiAuth.enabled);
+      if (keyInput) keyInput.value = currentApiAuth.apiKey || '';
+      if (badge) {
+        if (currentApiAuth.enabled) {
+          badge.textContent = '🔒 已开启鉴权';
+          badge.style.background = '#ecfdf5';
+          badge.style.color = '#059669';
+          badge.style.borderColor = '#a7f3d0';
+        } else {
+          badge.textContent = '🔓 已关闭 (免密)';
+          badge.style.background = '#f1f5f9';
+          badge.style.color = '#64748b';
+          badge.style.borderColor = '#e2e8f0';
+        }
+      }
+      updateDocSnippets();
+    }
+
+    function toggleApiAuthSwitch(checked) {
+      currentApiAuth.enabled = checked;
+      const badge = $('apiAuthStatusBadge');
+      if (badge) {
+        if (checked) {
+          badge.textContent = '🔒 待保存 (将开启)';
+          badge.style.background = '#fef3c7';
+          badge.style.color = '#d97706';
+          badge.style.borderColor = '#fde68a';
+        } else {
+          badge.textContent = '🔓 待保存 (将关闭)';
+          badge.style.background = '#f1f5f9';
+          badge.style.color = '#64748b';
+          badge.style.borderColor = '#e2e8f0';
+        }
+      }
+      updateDocSnippets();
+    }
+
+    async function saveApiAuthConfig() {
+      const enabled = $('apiAuthToggle').checked;
+      const btn = $('btnSaveApiAuth');
+      const msgEl = $('apiAuthMsg');
+      msgEl.style.display = 'none';
+      btn.disabled = true;
+      btn.innerHTML = '保存中...';
+      try {
+        const r = await fetch('/api/api-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        });
+        const j = await r.json();
+        if (j.success) {
+          currentApiAuth.enabled = j.enabled;
+          currentApiAuth.apiKey = j.apiKey;
+          updateApiAuthUI();
+          msgEl.textContent = '✅ ' + j.message + (j.enabled ? ' (客户端现需附带 Token 鉴权)' : ' (已恢复免密调用)');
+          msgEl.style.background = '#ecfdf5';
+          msgEl.style.color = '#065f46';
+          msgEl.style.borderColor = '#a7f3d0';
+          msgEl.style.display = 'block';
+          setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
+        } else {
+          msgEl.textContent = '❌ ' + (j.message || '保存失败');
+          msgEl.style.background = '#fef2f2';
+          msgEl.style.color = '#991b1b';
+          msgEl.style.borderColor = '#fecaca';
+          msgEl.style.display = 'block';
+        }
+      } catch (e) {
+        msgEl.textContent = '❌ 网络错误: ' + e.message;
+        msgEl.style.background = '#fef2f2';
+        msgEl.style.color = '#991b1b';
+        msgEl.style.borderColor = '#fecaca';
+        msgEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '💾 保存并应用设置';
+      }
+    }
+
+    async function regenerateApiKey() {
+      if (!confirm('⚠️ 确定要重新生成 API Token 吗？\n\n重新生成后，旧 Token 将立即失效，请同步更新已接入的客户端。')) {
+        return;
+      }
+      const btn = $('btnRegenApiKey');
+      const msgEl = $('apiAuthMsg');
+      msgEl.style.display = 'none';
+      btn.disabled = true;
+      btn.innerHTML = '生成中...';
+      try {
+        const r = await fetch('/api/api-auth/regenerate', { method: 'POST' });
+        const j = await r.json();
+        if (j.success) {
+          currentApiAuth.apiKey = j.apiKey;
+          currentApiAuth.enabled = j.enabled;
+          updateApiAuthUI();
+          msgEl.textContent = '✅ ' + j.message + '，新 Token 已生效！';
+          msgEl.style.background = '#ecfdf5';
+          msgEl.style.color = '#065f46';
+          msgEl.style.borderColor = '#a7f3d0';
+          msgEl.style.display = 'block';
+          setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
+        } else {
+          msgEl.textContent = '❌ ' + (j.message || '生成失败');
+          msgEl.style.background = '#fef2f2';
+          msgEl.style.color = '#991b1b';
+          msgEl.style.borderColor = '#fecaca';
+          msgEl.style.display = 'block';
+        }
+      } catch (e) {
+        msgEl.textContent = '❌ 网络错误: ' + e.message;
+        msgEl.style.background = '#fef2f2';
+        msgEl.style.color = '#991b1b';
+        msgEl.style.borderColor = '#fecaca';
+        msgEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔄 重新生成 Token';
+      }
+    }
+
+    function copyApiKeyValue(btn) {
+      const val = $('apiKeyValue').value;
+      if (!val) return;
+      navigator.clipboard.writeText(val).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '已复制!';
+        btn.style.background = '#059669';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.background = '';
+        }, 1500);
+      });
+    }
+
+    // ================== 顶部 Tab 切换 ==================
+    function switchTab(tab) {
+      document.querySelectorAll('.nav-tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+      });
+      document.querySelectorAll('.tab-content').forEach(p => {
+        p.classList.toggle('active', p.id === 'tab-' + tab);
+      });
+      if (tab === 'test') populateTestModelSelect();
+      if (tab === 'settings') fetchSystemInfo();
+    }
+
+    // ================== 模型列表 ==================
+    async function loadModels() {
+      if (isLoadingModels) return;
+      isLoadingModels = true;
+      try {
+        const r = await fetch('/v1/models');
+        if (!r.ok) {
+          if (r.status === 401) { location.reload(); return; }
+          throw new Error(`HTTP ${r.status}`);
+        }
+        const j = await r.json();
+        allModels = j.data || [];
+        renderStats();
+        renderTable(allModels);
+        renderPoolModels(allModels.map(m => m.displayName || m.id));
+        populateTestModelSelect();
+      } catch (err) {
+        $('modelTableBody').innerHTML = `<tr><td colspan="6" style="text-align: center; color: #ef4444; padding: 24px;">⚠️ 模型加载失败: ${err.message}</td></tr>`;
+      } finally {
+        isLoadingModels = false;
+      }
+    }
+
+    function renderStats() {
+      $('statTotal').textContent = allModels.length;
+      $('statVL').textContent = allModels.filter(m => m.is_vl).length + ' 个';
+      const maxCtx = allModels.length ? Math.max(...allModels.map(m => m.context_window || 0)) : 0;
+      $('statContext').textContent = maxCtx ? (maxCtx >= 1000000 ? (maxCtx / 1000000).toFixed(1) + 'M' : (maxCtx / 1000).toFixed(0) + 'K') : '--';
+    }
+
+    function copyModelName(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '已复制!';
+        btn.style.background = '#ecfdf5';
+        btn.style.color = '#059669';
+        btn.style.borderColor = '#a7f3d0';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.background = '#f1f5f9';
+          btn.style.color = '#475569';
+          btn.style.borderColor = '#e2e8f0';
+        }, 1500);
+      });
+    }
+
+    function renderTable(models) {
+      const tbody = $('modelTableBody');
+      if (!models.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 24px;">未搜索到匹配的模型</td></tr>';
+        return;
+      }
+      tbody.innerHTML = models.map(m => {
+        const ctx = m.context_window ? (m.context_window >= 1000000 ? (m.context_window / 1000000) + 'M' : (m.context_window / 1000) + 'K') : '--';
+        const vl = m.is_vl ? '<span class="tag-badge tag-vl">👁️ VL 视觉</span>' : '<span style="color: #cbd5e1;">—</span>';
+        const price = m.price_factor != null ? m.price_factor.toFixed(2) + 'x' : '--';
+        const isDefault = m.is_default ? '<span class="tag-badge tag-default" style="margin-right: 4px;">DEFAULT</span>' : '';
+        return `
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                ${isDefault}
+                <strong style="font-family: var(--font-mono); color: #0f172a; font-size: 13px;">${escapeHtml(m.id)}</strong>
+                <button onclick="copyModelName('${escapeHtml(m.id)}', this)" title="复制模型名称"
+                  style="padding: 2px 7px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 5px; font-size: 10px; font-weight: 600; color: #475569; cursor: pointer; transition: all 0.15s;">
+                  复制
+                </button>
+              </div>
+            </td>
+            <td><code style="color: #64748b; font-size: 11px;">${escapeHtml(m.sdk_value)}</code></td>
+            <td style="color: #475569; max-width: 300px;">${escapeHtml(m.description || '--')}</td>
+            <td style="font-family: var(--font-mono);">${ctx}</td>
+            <td>${vl}</td>
+            <td style="font-family: var(--font-mono); color: #64748b;">${price}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function filterModels() {
+      const q = $('searchInput').value.toLowerCase().trim();
+      if (!q) { renderTable(allModels); return; }
+      const filtered = allModels.filter(m =>
+        (m.id || '').toLowerCase().includes(q) ||
+        (m.sdk_value || '').toLowerCase().includes(q) ||
+        (m.description || '').toLowerCase().includes(q) ||
+        (m.display_name || '').toLowerCase().includes(q)
+      );
+      renderTable(filtered);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+
+    // ================== 在线调试工作台 (Playground) ==================
+    function populateTestModelSelect() {
+      const sel = $('testModel');
+      if (!sel || !allModels.length) return;
+      const cur = sel.value;
+      sel.innerHTML = allModels.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)} (${escapeHtml(m.sdk_value)})</option>`).join('');
+      if (cur) sel.value = cur;
+      updateDocSnippets();
+    }
+
+    function updateDocSnippets() {
+      const model = $('testModel')?.value || (allModels[0] ? allModels[0].id : 'MiniMax-M3');
+      if ($('docModelBadge')) $('docModelBadge').textContent = model;
+
+      const authKey = currentApiAuth.apiKey || 'sk-qoder-xxxxxxxxxxxxxxxxxxxxxxxx';
+      const openAiAuthHeader = currentApiAuth.enabled
+        ? `  -H "Authorization: Bearer ${authKey}" \\\n`
+        : `  -H "Authorization: Bearer optional" # (当前免密模式) \\\n`;
+
+      const anthropicAuthHeader = currentApiAuth.enabled
+        ? `  -H "x-api-key: ${authKey}" \\\n`
+        : `  -H "x-api-key: optional" # (当前免密模式) \\\n`;
+
+      const openaiSnippet = `curl -N http://127.0.0.1:10088/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+${openAiAuthHeader}  -d '{
+    "model": "${model}",
+    "messages": [
+      {"role": "user", "content": "你好，请用一句话介绍你自己"}
+    ],
+    "stream": true
+  }'`;
+
+      const anthropicSnippet = `curl -N http://127.0.0.1:10088/v1/messages \\
+  -H "Content-Type: application/json" \\
+${anthropicAuthHeader}  -d '{
+    "model": "${model}",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "你好，请用一句话介绍你自己"}
+    ],
+    "stream": true
+  }'`;
+
+      if ($('docOpenAiCode')) $('docOpenAiCode').textContent = openaiSnippet;
+      if ($('docAnthropicCode')) $('docAnthropicCode').textContent = anthropicSnippet;
+    }
+
+    function copyDocText(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '已复制!';
+        btn.style.color = '#34d399';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.color = '';
+        }, 1500);
+      });
+    }
+
+    function clearOutput() {
+      $('testOutput').textContent = '';
+      $('responseStatus').textContent = '已清空';
+      const bar = $('perfMetricsBar');
+      if (bar) bar.style.display = 'none';
+    }
+
+    function renderPerfMetrics(isWarm, ttfbMs, durationMs) {
+      const bar = $('perfMetricsBar');
+      const elWarm = $('perfIsWarm');
+      const elTtfb = $('perfTtfb');
+      const elDuration = $('perfDuration');
+      if (!bar) return;
+
+      bar.style.display = 'grid';
+      if (elWarm) {
+        if (isWarm) {
+          elWarm.textContent = '⚡ 命中预热加速池 (Warm)';
+          elWarm.style.color = '#059669';
+        } else {
+          elWarm.textContent = '❄️ 冷启动实例 (Cold)';
+          elWarm.style.color = '#d97706';
+        }
+      }
+      if (elTtfb) {
+        elTtfb.textContent = `${(ttfbMs / 1000).toFixed(2)}s (${ttfbMs}ms)`;
+      }
+      if (elDuration) {
+        elDuration.textContent = `${(durationMs / 1000).toFixed(2)}s (${durationMs}ms)`;
+      }
+    }
+
+    async function runTest() {
+      const model = $('testModel').value;
+      const prompt = $('testPrompt').value.trim();
+      const stream = $('testStream').checked;
+      const protocol = $('testProtocol').value;
+      const btn = $('btnTest');
+      if (!prompt) { alert('请输入测试 Prompt'); return; }
+      if (!model) { alert('请选择目标模型'); return; }
+
+      btn.disabled = true;
+      btn.innerHTML = '处理中...';
+      clearOutput();
+      const out = $('testOutput');
+      const statusEl = $('responseStatus');
+      statusEl.textContent = '请求中...';
+      const startTime = Date.now();
+      let clientFirstTokenMs = null;
+      let serverPerf = null;
+
+      try {
+        if (protocol === 'anthropic') {
+          const endpoint = '/v1/messages';
+          const body = {
+            model,
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: prompt }],
+            stream,
+          };
+          if (stream) {
+            const r = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const reader = r.body.getReader();
+            const dec = new TextDecoder();
+            let buf = '';
+            let textBlock = null;
+            let curEvent = '';
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop() || '';
+              for (const line of lines) {
+                if (line.startsWith('event:')) curEvent = line.slice(6).trim();
+                else if (line.startsWith('data:')) {
+                  const payload = line.slice(5).trim();
+                  if (!payload) continue;
+                  try {
+                    const j = JSON.parse(payload);
+                    if (j.qoder_perf) serverPerf = j.qoder_perf;
+                    if (curEvent === 'content_block_delta' && j.delta?.text) {
+                      if (clientFirstTokenMs === null) clientFirstTokenMs = Date.now() - startTime;
+                      if (!textBlock) {
+                        textBlock = document.createElement('div');
+                        out.appendChild(textBlock);
+                      }
+                      textBlock.textContent += j.delta.text;
+                    }
+                  } catch (e) {}
+                }
+              }
+            }
+          } else {
+            const r = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const j = await r.json();
+            if (j.error) throw new Error(j.error.message || '请求失败');
+            if (j.qoder_perf) serverPerf = j.qoder_perf;
+            const ansText = j.content?.map(c => c.text).join('') || '';
+            let out1 = `▶ [Anthropic /v1/messages] 模型: ${j.model}\n\n`;
+            out1 += `${ansText}\n\n`;
+            if (j.usage) out1 += `📊 usage: ${JSON.stringify(j.usage, null, 2)}\n`;
+            out.textContent = out1;
+          }
+        } else {
+          const endpoint = '/v1/chat/completions';
+          const body = {
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            stream,
+          };
+          if (stream) {
+            const r = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const reader = r.body.getReader();
+            const dec = new TextDecoder();
+            let buf = '';
+            let thinkingBlock = null;
+            let textBlock = null;
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop() || '';
+              for (const line of lines) {
+                if (line.startsWith('data:')) {
+                  const payload = line.slice(5).trim();
+                  if (!payload || payload === '[DONE]') continue;
+                  try {
+                    const j = JSON.parse(payload);
+                    if (j.qoder_perf) serverPerf = j.qoder_perf;
+                    const delta = j.choices?.[0]?.delta || {};
+                    if (delta.content || delta.reasoning_content) {
+                      if (clientFirstTokenMs === null) clientFirstTokenMs = Date.now() - startTime;
+                    }
+                    if (delta.content) {
+                      if (!textBlock) {
+                        if (thinkingBlock) out.appendChild(document.createTextNode('\n'));
+                        textBlock = document.createElement('div');
+                        out.appendChild(textBlock);
+                      }
+                      textBlock.textContent += delta.content;
+                    }
+                    if (delta.reasoning_content) {
+                      if (!thinkingBlock) {
+                        thinkingBlock = document.createElement('div');
+                        thinkingBlock.className = 'thinking-box';
+                        out.appendChild(thinkingBlock);
+                      }
+                      thinkingBlock.textContent += delta.reasoning_content;
+                    }
+                  } catch (e) {}
+                }
+              }
+            }
+          } else {
+            const r = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const j = await r.json();
+            if (j.error) throw new Error(j.error.message || '请求失败');
+            if (j.qoder_perf) serverPerf = j.qoder_perf;
+            const msg = j.choices?.[0]?.message || {};
+            let out1 = `▶ [OpenAI /v1/chat/completions] 模型: ${j.model}\n\n`;
+            if (msg.reasoning_content) {
+              out1 += `💭 深度思考:\n${msg.reasoning_content}\n\n`;
+            }
+            out1 += `${msg.content}\n\n`;
+            if (j.usage) out1 += `📊 usage: ${JSON.stringify(j.usage, null, 2)}\n`;
+            out.textContent = out1;
+          }
+        }
+
+        // Calculate and render performance metrics
+        const totalDurationMs = Date.now() - startTime;
+        const finalIsWarm = serverPerf ? Boolean(serverPerf.is_warm) : true;
+        const finalTtfbMs = serverPerf?.ttfb_ms || clientFirstTokenMs || totalDurationMs;
+        const finalDurationMs = serverPerf?.duration_ms || totalDurationMs;
+
+        statusEl.textContent = `完成 · TTFB ${(finalTtfbMs / 1000).toFixed(2)}s · 总计 ${(finalDurationMs / 1000).toFixed(2)}s`;
+        renderPerfMetrics(finalIsWarm, finalTtfbMs, finalDurationMs);
+
+        const summaryBox = document.createElement('div');
+        summaryBox.style.cssText = 'color: #94a3b8; font-size: 11px; font-family: var(--font-mono); margin-top: 14px; padding-top: 10px; border-top: 1px solid #1e293b; line-height: 1.7;';
+        summaryBox.innerHTML = `
+          ──────────────────────────────────────────────────────────<br>
+          ⚡ 预热加速状态: ${finalIsWarm ? '<span style="color:#34d399;font-weight:700;">已命中预热池 (Warm)</span>' : '<span style="color:#fbbf24;">冷启动 (Cold)</span>'}<br>
+          ⏱️ 首字响应时间 (TTFB): <span style="color:#818cf8;font-weight:700;">${(finalTtfbMs / 1000).toFixed(2)}s (${finalTtfbMs}ms)</span><br>
+          ⏳ 完整响应总耗时: <span style="color:#e2e8f0;font-weight:700;">${(finalDurationMs / 1000).toFixed(2)}s (${finalDurationMs}ms)</span>
+        `;
+        out.appendChild(summaryBox);
+
+        fetchSystemInfo();
+      } catch (err) {
+        statusEl.textContent = '异常';
+        out.innerHTML = `<div style="color: #f87171; background: rgba(239, 68, 68, 0.15); padding: 12px; border-radius: 8px;">❌ 请求异常: ${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🚀 发送测试请求';
+      }
+    }
+
+    // ================== 修改密码 ==================
+    async function doChangePwd(e) {
+      e.preventDefault();
+      const msgEl = $('pwdMsg');
+      msgEl.style.display = 'none';
+
+      const oldPwd = $('oldPassword').value;
+      const newPwd = $('newPassword').value;
+      const confirm = $('confirmPassword').value;
+
+      if (newPwd !== confirm) {
+        msgEl.textContent = '两次输入的新密码不一致';
+        msgEl.style.display = 'block';
+        return;
+      }
+
+      const btn = $('btnChangePwd');
+      btn.disabled = true;
+      btn.innerHTML = '保存中...';
+      try {
+        const r = await fetch('/api/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
+        });
+        const j = await r.json();
+        if (!j.success) {
+          msgEl.textContent = j.message || '修改失败';
+          msgEl.style.display = 'block';
+        } else {
+          msgEl.textContent = '✅ ' + j.message;
+          msgEl.style.background = '#ecfdf5';
+          msgEl.style.borderColor = '#a7f3d0';
+          msgEl.style.color = '#065f46';
+          msgEl.style.display = 'block';
+          $('oldPassword').value = '';
+          $('newPassword').value = '';
+          $('confirmPassword').value = '';
+          isDefaultPassword = false;
+          applyPasswordState(false);
+        }
+      } catch (err) {
+        msgEl.textContent = '网络异常: ' + err.message;
+        msgEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '保存修改';
+      }
+    }
+
+    // ================== 初始化 ==================
+    (async function init() {
+      try {
+        await fetchSystemInfo();
+        const ok = await checkSession();
+        if (ok) return;
+      } catch (e) {}
+    })();
+  </script>
+</body>
+</html>

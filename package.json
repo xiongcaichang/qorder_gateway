@@ -1,0 +1,23 @@
+{
+  "name": "qorder-gateway",
+  "version": "1.0.0",
+  "description": "Qoder Direct OpenAPI & Anthropic Service with SQLite Storage and WarmQueryPool",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "./start.sh",
+    "dev": "PORT=10088 node server.mjs",
+    "stop": "pm2 stop qorder_gateway",
+    "restart": "pm2 restart qorder_gateway --update-env"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
+    "@qoder-ai/qoder-agent-sdk": "^1.0.25",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
