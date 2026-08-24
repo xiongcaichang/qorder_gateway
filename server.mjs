@@ -356,6 +356,10 @@ class WarmQueryPool {
         options: {
           auth,
           tools: [],
+          skills: [],
+          plugins: [],
+          settingSources: [],
+          systemPrompt: 'You are a helpful AI assistant.',
           persistSession: false,
         },
       });
@@ -461,7 +465,7 @@ async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAc
     }
   }
 
-  // Fallback to direct query with verified credentials
+  // Fallback to direct query with verified credentials and clean system prompt
   onAcquired?.({ isWarm: false });
   console.log(`[exec] Executing direct query (model: ${modelKey})`);
   const effectiveAuth = isDefaultAuth ? accessTokenFromEnv() : auth;
@@ -472,6 +476,10 @@ async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAc
         auth: effectiveAuth,
         model: modelKey,
         tools: [],
+        skills: [],
+        plugins: [],
+        settingSources: [],
+        systemPrompt: 'You are a helpful AI assistant.',
         persistSession: false,
       },
     });
