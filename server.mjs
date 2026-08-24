@@ -173,6 +173,7 @@ async function getModelRegistry() {
     for (const m of models) {
       MODEL_REGISTRY.set(m.displayName, m);
       MODEL_REGISTRY_BY_VALUE.set(m.value, m);
+      liveWarmRegistry.registerModel(m.displayName, m.value);
     }
     MODEL_REGISTRY_LOADED_AT = Date.now();
     console.log(`[models] Loaded ${models.length} models (${Date.now() - start}ms)`);
@@ -181,6 +182,68 @@ async function getModelRegistry() {
     try { await q.close?.(); } catch (e) {}
   }
 }
+
+// ============================================================================
+// In-Memory Live Warm Model Registry (纯内存实时运行时状态，不存入数据库)
+// ============================================================================
+class LiveWarmModelRegistry {
+  constructor() {
+    this.models = new Map();
+  }
+
+  registerModel(modelName, sdkKey) {
+    if (!modelName) return;
+    const key = modelName.toLowerCase();
+    if (!this.models.has(key)) {
+      this.models.set(key, {
+        modelName,
+        sdkKey: sdkKey || modelName,
+        status: 'ready',
+        lastWarmedAt: Date.now(),
+        lastTtfbMs: null,
+        totalCalls: 0,
+        warmHits: 0,
+      });
+    }
+  }
+
+  recordCall(modelName, sdkKey, isWarm, ttfbMs) {
+    if (!modelName) return;
+    const key = modelName.toLowerCase();
+    let item = this.models.get(key);
+    if (!item) {
+      // 自动将未登记的模型动态加入预热清单
+      item = {
+        modelName,
+        sdkKey: sdkKey || modelName,
+        status: 'ready',
+        lastWarmedAt: Date.now(),
+        lastTtfbMs: ttfbMs || null,
+        totalCalls: 1,
+        warmHits: isWarm ? 1 : 0,
+      };
+      this.models.set(key, item);
+      console.log(`[warm-registry] 自动将新模型 [${modelName}] 加入内存预热清单`);
+      return;
+    }
+
+    item.status = 'ready';
+    item.lastWarmedAt = Date.now();
+    if (ttfbMs) item.lastTtfbMs = ttfbMs;
+    item.totalCalls += 1;
+    if (isWarm) item.warmHits += 1;
+  }
+
+  getWarmedModels() {
+    return Array.from(this.models.values());
+  }
+
+  getWarmedModelNames() {
+    return Array.from(this.models.values()).map(m => m.modelName);
+  }
+}
+
+const liveWarmRegistry = new LiveWarmModelRegistry();
 
 function resolveModelKey(modelInput) {
   if (!modelInput) return 'auto';
@@ -633,6 +696,7 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
         durationMs,
         status: 200,
       });
+      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
       res.write(`data: ${JSON.stringify({
         id: reqId,
@@ -685,6 +749,7 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
         durationMs,
         status: 200,
       });
+      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
       res.json({
         id: reqId,
@@ -835,6 +900,7 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
         durationMs,
         status: 200,
       });
+      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
       // 4. message_delta
       res.write(`event: message_delta\ndata: ${JSON.stringify({
@@ -891,6 +957,7 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
         durationMs,
         status: 200,
       });
+      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
       res.json({
         id: reqId,
@@ -1113,11 +1180,6 @@ app.get('/api/pool-status', (_req, res) => {
 app.get('/api/system-info', async (_req, res) => {
   const token = process.env.QODER_PERSONAL_ACCESS_TOKEN || '';
   const masked = token ? `${token.slice(0, 7)}...${token.slice(-4)}` : '未配置 (未设置 QODER_PERSONAL_ACCESS_TOKEN)';
-  let modelNames = [];
-  try {
-    const models = await getModelRegistry();
-    modelNames = models.map(m => m.displayName);
-  } catch (e) {}
 
   res.json({
     success: true,
@@ -1129,10 +1191,17 @@ app.get('/api/system-info', async (_req, res) => {
     uptime_seconds: Math.floor(process.uptime()),
     pool_stats: warmPool.getStats(),
     is_default_password: Database.isDefaultPassword(),
-    warm_models: modelNames,
+    warm_models: liveWarmRegistry.getWarmedModelNames(),
     api_auth: Database.getApiAuthConfig(),
     storage: 'SQLite (node:sqlite)',
     node_version: process.version,
+  });
+});
+
+app.get('/api/warm-models', (_req, res) => {
+  res.json({
+    success: true,
+    data: liveWarmRegistry.getWarmedModels(),
   });
 });
 
