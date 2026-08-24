@@ -341,7 +341,7 @@ function resolveAuth(req) {
 // Preheats Worker processes & authentications in background to eliminate ~8.5s handshake latency
 // ============================================================================
 class WarmQueryPool {
-  constructor(targetSize = 2, maxCapacity = 4) {
+  constructor(targetSize = 4, maxCapacity = 8) {
     this.targetSize = targetSize;
     this.maxCapacity = maxCapacity;
     this.pool = [];
@@ -352,6 +352,7 @@ class WarmQueryPool {
   async _createWarmInstance() {
     try {
       const auth = accessTokenFromEnv();
+      let activeModel = 'mmodel';
       const warm = await startup({
         options: {
           auth,
@@ -360,10 +361,19 @@ class WarmQueryPool {
           plugins: [],
           settingSources: [],
           systemPrompt: 'You are a helpful AI assistant.',
+          resolveModel: (_ctx) => {
+            return { model: activeModel };
+          },
           persistSession: false,
         },
       });
-      return warm;
+      if (!warm) return null;
+      return {
+        warm,
+        setModel: (m) => { activeModel = m; },
+        query: (prompt) => warm.query(prompt),
+        close: () => warm.close?.(),
+      };
     } catch (err) {
       console.warn('[pool] Failed to create warm instance:', err.message);
       return null;
@@ -373,16 +383,19 @@ class WarmQueryPool {
   replenish() {
     if (this.isShuttingDown) return;
     const currentTotal = this.pool.length + this.pendingCount;
-    if (currentTotal < this.targetSize && currentTotal < this.maxCapacity) {
+    const needed = Math.min(this.targetSize - currentTotal, this.maxCapacity - currentTotal);
+    if (needed <= 0) return;
+
+    for (let i = 0; i < needed; i++) {
       this.pendingCount++;
       this._createWarmInstance()
-        .then((warm) => {
+        .then((item) => {
           this.pendingCount--;
-          if (warm) {
+          if (item) {
             if (this.isShuttingDown || this.pool.length >= this.maxCapacity) {
-              warm.close?.();
+              item.close?.();
             } else {
-              this.pool.push(warm);
+              this.pool.push(item);
               console.log(`[pool] Warm session ready (Idle pool size: ${this.pool.length})`);
             }
           }
@@ -439,29 +452,29 @@ class WarmQueryPool {
   async closeAll() {
     this.isShuttingDown = true;
     while (this.pool.length > 0) {
-      const warm = this.pool.shift();
-      try { await warm?.close?.(); } catch (e) {}
+      const item = this.pool.shift();
+      try { await item?.close?.(); } catch (e) {}
     }
   }
 }
 
-const warmPool = new WarmQueryPool(2, 4);
+const warmPool = new WarmQueryPool(4, 8);
 
 // Unified Query Execution Generator with Session Acquisition Callback
 async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAcquired }) {
-  const warm = await warmPool.acquire(isDefaultAuth);
-  if (warm) {
+  const warmItem = await warmPool.acquire(isDefaultAuth);
+  if (warmItem) {
     onAcquired?.({ isWarm: true });
     console.log(`[exec] Using preheated session from WarmPool (model: ${modelKey})`);
     try {
-      if (modelKey && warm.session?.setModel) {
-        await warm.session.setModel(modelKey);
+      if (modelKey && warmItem.setModel) {
+        warmItem.setModel(modelKey);
       }
-      yield* warm.query(promptStream);
+      yield* warmItem.query(promptStream);
       return;
     } catch (err) {
       console.warn(`[exec] Warm query failed, falling back to direct query: ${err.message}`);
-      try { warm.close?.(); } catch (e) {}
+      try { warmItem.close?.(); } catch (e) {}
     }
   }
 
@@ -567,6 +580,7 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
 
       let fullText = '';
       let fullThinking = '';
@@ -741,6 +755,7 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
 
       // 1. message_start
       res.write(`event: message_start\ndata: ${JSON.stringify({
