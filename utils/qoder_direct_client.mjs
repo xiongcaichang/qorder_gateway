@@ -75,7 +75,7 @@ class QoderTokenManager {
 export const qoderTokenManager = new QoderTokenManager();
 
 /**
- * Model resolution for Qoder Cloud backend
+ * Model resolution for Qoder Cloud backend (Official 1-to-1 Mapping)
  */
 const MODEL_MAPPINGS = {
   // MiniMax
@@ -86,30 +86,39 @@ const MODEL_MAPPINGS = {
   // DeepSeek
   'deepseek-v4-pro': 'dmodel',
   'deepseek-v4': 'dmodel',
-  'deepseek-v4-flash': 'mmodel', // fallback to fast model
   'deepseek': 'dmodel',
   'dmodel': 'dmodel',
-  'dfmodel': 'mmodel',
+  'deepseek-v4-flash': 'dfmodel',
+  'dfmodel': 'dfmodel',
 
   // Qwen
-  'qwen3.8-max': 'qmodel',
-  'qwen3.7-max': 'qmodel',
+  'qwen3.8-max': 'qmodel_38max',
+  'qmodel_38max': 'qmodel_38max',
+  'qwen3.7-max': 'qmodel_latest',
+  'qmodel_latest': 'qmodel_latest',
   'qwen3.7-plus': 'qmodel',
   'qmodel': 'qmodel',
 
   // GLM
   'glm-5.3': 'gmodel',
-  'glm-5.2': 'gmodel',
   'gmodel': 'gmodel',
+  'glm-5.2': 'gm51model',
+  'gm51model': 'gm51model',
 
   // Kimi
-  'kimi-k3': 'kmodel',
+  'kimi-k3': 'kmodel_latest',
+  'kmodel_latest': 'kmodel_latest',
   'kimi-k2.7-code': 'kmodel',
   'kmodel': 'kmodel',
+
+  // Cantus
+  'cantus': 'cmodel',
+  'cmodel': 'cmodel',
 
   // Preset categories
   'ultimate': 'ultimate',
   'performance': 'performance',
+  'efficient': 'efficient',
   'lite': 'lite',
   'auto': 'auto',
 
