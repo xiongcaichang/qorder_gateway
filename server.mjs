@@ -188,22 +188,22 @@ app.post('/api/change-password', requireAuth, (req, res) => {
 // Model Registry (Dynamically fetched via SDK getAvailableModels)
 // ============================================================================
 export const OFFICIAL_MODELS = [
-  { value: 'auto', displayName: 'Auto', description: 'Auto Model Router · 1.00x Credit', priceFactor: 1.0, isReasoning: false, isVl: false, isDefault: true },
-  { value: 'ultimate', displayName: 'Ultimate', description: 'Reasoning · High Performance · 1.60x Credit', priceFactor: 1.6, isReasoning: true, isVl: true },
-  { value: 'performance', displayName: 'Performance', description: 'Balanced High Performance · 1.10x Credit', priceFactor: 1.1, isReasoning: false, isVl: true },
-  { value: 'efficient', displayName: 'Efficient', description: 'Fast & Efficient · 0.30x Credit', priceFactor: 0.3, isReasoning: false, isVl: false },
-  { value: 'lite', displayName: 'Lite', description: 'Free Tier · Fast · 0x Credit', priceFactor: 0.0, isReasoning: false, isVl: false, isFree: true },
-  { value: 'cmodel', displayName: 'Cantus', description: 'Reasoning · Vision · 3.20x Credit', priceFactor: 3.2, isReasoning: true, isVl: true },
-  { value: 'qmodel_38max', displayName: 'Qwen3.8-Max', description: 'Reasoning · Vision · 0.50x Credit', priceFactor: 0.5, isReasoning: true, isVl: true },
-  { value: 'qmodel_latest', displayName: 'Qwen3.7-Max', description: 'Vision · 0.50x Credit', priceFactor: 0.5, isReasoning: false, isVl: true },
-  { value: 'qmodel', displayName: 'Qwen3.7-Plus', description: 'Fast Code & General · 0.10x Credit', priceFactor: 0.1, isReasoning: false, isVl: false },
-  { value: 'kmodel_latest', displayName: 'Kimi-K3', description: 'Vision · Long Context · 0.80x Credit', priceFactor: 0.8, isReasoning: false, isVl: true },
-  { value: 'kmodel', displayName: 'Kimi-K2.7-Code', description: 'Code Specialist · 0.30x Credit', priceFactor: 0.3, isReasoning: false, isVl: false },
-  { value: 'gmodel', displayName: 'GLM-5.3', description: 'Reasoning · Vision · 0.60x Credit', priceFactor: 0.6, isReasoning: true, isVl: true },
-  { value: 'gm51model', displayName: 'GLM-5.2', description: 'Reasoning · 0.60x Credit', priceFactor: 0.6, isReasoning: true, isVl: false },
-  { value: 'dmodel', displayName: 'DeepSeek-V4-Pro', description: 'Reasoning · Vision · 0.80x Credit', priceFactor: 0.8, isReasoning: true, isVl: true },
-  { value: 'dfmodel', displayName: 'DeepSeek-V4-Flash', description: 'Reasoning · Vision · 0.30x Credit', priceFactor: 0.3, isReasoning: true, isVl: true },
-  { value: 'mmodel', displayName: 'MiniMax-M3', description: 'Vision · Fast · 0.20x Credit', priceFactor: 0.2, isReasoning: false, isVl: true },
+  { value: 'auto', cloudKey: 'auto', displayName: 'Auto', description: 'Auto Model Router · 1.00x Credit', priceFactor: 1.0, isReasoning: false, isVl: false, isDefault: true },
+  { value: 'ultimate', cloudKey: 'ultimate', displayName: 'Ultimate', description: 'Reasoning · High Performance · 1.60x Credit', priceFactor: 1.6, isReasoning: true, isVl: true },
+  { value: 'performance', cloudKey: 'performance', displayName: 'Performance', description: 'Balanced High Performance · 1.10x Credit', priceFactor: 1.1, isReasoning: false, isVl: true },
+  { value: 'efficient', cloudKey: 'efficient', displayName: 'Efficient', description: 'Fast & Efficient · 0.30x Credit', priceFactor: 0.3, isReasoning: false, isVl: false },
+  { value: 'lite', cloudKey: 'lite', displayName: 'Lite', description: 'Free Tier · Fast · 0x Credit', priceFactor: 0.0, isReasoning: false, isVl: false, isFree: true },
+  { value: 'cmodel', cloudKey: 'ultimate', displayName: 'Cantus', description: 'Reasoning · Vision · 3.20x Credit (云端 Key: ultimate)', priceFactor: 3.2, isReasoning: true, isVl: true },
+  { value: 'qmodel_38max', cloudKey: 'qmodel', displayName: 'Qwen3.8-Max', description: 'Reasoning · Vision · 0.50x Credit (云端 Key: qmodel)', priceFactor: 0.5, isReasoning: true, isVl: true },
+  { value: 'qmodel_latest', cloudKey: 'qmodel', displayName: 'Qwen3.7-Max', description: 'Vision · 0.50x Credit (云端 Key: qmodel)', priceFactor: 0.5, isReasoning: false, isVl: true },
+  { value: 'qmodel', cloudKey: 'qmodel', displayName: 'Qwen3.7-Plus', description: 'Fast Code & General · 0.10x Credit (云端 Key: qmodel)', priceFactor: 0.1, isReasoning: false, isVl: false },
+  { value: 'kmodel_latest', cloudKey: 'kmodel', displayName: 'Kimi-K3', description: 'Vision · Long Context · 0.80x Credit (云端 Key: kmodel)', priceFactor: 0.8, isReasoning: false, isVl: true },
+  { value: 'kmodel', cloudKey: 'kmodel', displayName: 'Kimi-K2.7-Code', description: 'Code Specialist · 0.30x Credit (云端 Key: kmodel)', priceFactor: 0.3, isReasoning: false, isVl: false },
+  { value: 'gmodel', cloudKey: 'gmodel', displayName: 'GLM-5.3', description: 'Reasoning · Vision · 0.60x Credit (云端 Key: gmodel)', priceFactor: 0.6, isReasoning: true, isVl: true },
+  { value: 'gm51model', cloudKey: 'gmodel', displayName: 'GLM-5.2', description: 'Reasoning · 0.60x Credit (云端 Key: gmodel)', priceFactor: 0.6, isReasoning: true, isVl: false },
+  { value: 'dmodel', cloudKey: 'dmodel', displayName: 'DeepSeek-V4-Pro', description: 'Reasoning · Vision · 0.80x Credit (云端 Key: dmodel)', priceFactor: 0.8, isReasoning: true, isVl: true },
+  { value: 'dfmodel', cloudKey: 'deepseek-v4-flash', displayName: 'DeepSeek-V4-Flash', description: 'Reasoning · Vision · 0.30x Credit (云端 Key: deepseek-v4-flash)', priceFactor: 0.3, isReasoning: true, isVl: true },
+  { value: 'mmodel', cloudKey: 'mmodel', displayName: 'MiniMax-M3', description: 'Vision · Fast · 0.20x Credit (云端 Key: mmodel)', priceFactor: 0.2, isReasoning: false, isVl: true },
 ];
 
 let MODEL_REGISTRY = new Map();
@@ -214,7 +214,7 @@ async function getModelRegistry() {
     for (const m of OFFICIAL_MODELS) {
       MODEL_REGISTRY.set(m.displayName, m);
       MODEL_REGISTRY_BY_VALUE.set(m.value, m);
-      liveWarmRegistry.registerModel(m.displayName, m.value);
+      liveWarmRegistry.registerModel(m.displayName, m.cloudKey || m.value);
     }
   }
   return OFFICIAL_MODELS;
@@ -285,16 +285,16 @@ const liveWarmRegistry = new LiveWarmModelRegistry();
 function resolveModelKey(modelInput) {
   if (!modelInput) return 'auto';
   if (MODEL_REGISTRY_BY_VALUE.has(modelInput)) {
-    return MODEL_REGISTRY_BY_VALUE.get(modelInput).value;
+    return MODEL_REGISTRY_BY_VALUE.get(modelInput).cloudKey || MODEL_REGISTRY_BY_VALUE.get(modelInput).value;
   }
   if (MODEL_REGISTRY.has(modelInput)) {
-    return MODEL_REGISTRY.get(modelInput).value;
+    return MODEL_REGISTRY.get(modelInput).cloudKey || MODEL_REGISTRY.get(modelInput).value;
   }
   const lower = modelInput.toLowerCase();
   for (const m of MODEL_REGISTRY.values()) {
-    if (m.displayName.toLowerCase() === lower) return m.value;
+    if (m.displayName.toLowerCase() === lower) return m.cloudKey || m.value;
   }
-  return modelInput;
+  return resolveDirectModelKey(modelInput);
 }
 
 function toOpenAIModel(m) {
@@ -310,7 +310,8 @@ function toOpenAIModel(m) {
     is_vl: m.isVl,
     is_default: m.isDefault,
     is_enabled: m.isEnabled ?? true,
-    sdk_value: m.value,
+    sdk_value: m.cloudKey || m.value,
+    cloud_value: m.cloudKey || m.value,
     available_context_windows: m.availableContextWindows,
     price_factor: m.priceFactor,
     format: m.format,

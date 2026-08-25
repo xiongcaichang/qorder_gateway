@@ -956,7 +956,7 @@
               <thead>
                 <tr>
                   <th>模型 ID (displayName)</th>
-                  <th>SDK Value</th>
+                  <th>云端直连 Value (映射)</th>
                   <th>功能与描述</th>
                   <th>上下文</th>
                   <th>视觉</th>
@@ -992,7 +992,10 @@
               </div>
 
               <div class="form-group">
-                <label class="form-label">目标模型 (Model)</label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="form-label" style="margin-bottom: 0;">目标模型 (Model)</label>
+                  <span id="modelMappingTip" style="font-size: 11px; font-family: var(--font-mono); color: #4338ca; background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-weight: 600;"></span>
+                </div>
                 <select id="testModel" onchange="updateDocSnippets()" class="form-input"></select>
               </div>
 
@@ -1609,7 +1612,7 @@ QODER_PERSONAL_ACCESS_TOKEN=pt-xxxxxxxx...
                 </button>
               </div>
             </td>
-            <td><code style="color: #64748b; font-size: 11px;">${escapeHtml(m.sdk_value)}</code></td>
+            <td><code style="color: #4338ca; background: #e0e7ff; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 11px;">${escapeHtml(m.sdk_value || m.cloud_value)}</code></td>
             <td style="color: #475569; max-width: 300px;">${escapeHtml(m.description || '--')}</td>
             <td style="font-family: var(--font-mono);">${ctx}</td>
             <td>${vl}</td>
@@ -1640,13 +1643,24 @@ QODER_PERSONAL_ACCESS_TOKEN=pt-xxxxxxxx...
       const sel = $('testModel');
       if (!sel || !allModels.length) return;
       const cur = sel.value;
-      sel.innerHTML = allModels.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)} (${escapeHtml(m.sdk_value)})</option>`).join('');
+      sel.innerHTML = allModels.map(m => {
+        const cloudVal = m.sdk_value || m.cloud_value || m.id;
+        return `<option value="${escapeHtml(m.id)}">${escapeHtml(m.id)}  👉  [云端直连: ${escapeHtml(cloudVal)}]</option>`;
+      }).join('');
       if (cur) sel.value = cur;
       updateDocSnippets();
     }
 
     function updateDocSnippets() {
-      const model = $('testModel')?.value || (allModels[0] ? allModels[0].id : 'MiniMax-M3');
+      const sel = $('testModel');
+      const model = sel?.value || (allModels[0] ? allModels[0].id : 'MiniMax-M3');
+      const modelObj = allModels.find(m => m.id === model) || {};
+      const cloudKey = modelObj.sdk_value || modelObj.cloud_value || model;
+
+      if ($('modelMappingTip')) {
+        $('modelMappingTip').innerHTML = `云端实际路由 Key: <strong>${escapeHtml(cloudKey)}</strong>`;
+      }
+
       if ($('docModelBadge')) $('docModelBadge').textContent = model;
 
       const authKey = currentApiAuth.apiKey || 'sk-qoder-xxxxxxxxxxxxxxxxxxxxxxxx';
