@@ -168,10 +168,11 @@ export async function* streamDirectChatCompletion({
   const reqId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
 
-  // Convert OpenAI tool definitions to Qoder format
+  // Convert OpenAI or Anthropic tool definitions to standard Qoder/OpenAI format
   let nativeTools = undefined;
   if (Array.isArray(tools) && tools.length > 0) {
     nativeTools = tools.map((t) => {
+      // 1. OpenAI function tool format: { type: 'function', function: { name, description, parameters } }
       if (t.type === 'function' && t.function) {
         return {
           type: 'function',
@@ -182,48 +183,109 @@ export async function* streamDirectChatCompletion({
           },
         };
       }
-      return t;
+      // 2. Anthropic tool format: { name, description, input_schema }
+      if (t.name && (t.input_schema || !t.type)) {
+        return {
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description || '',
+            parameters: t.input_schema || t.parameters || { type: 'object', properties: {} },
+          },
+        };
+      }
+      // 3. Generic fallback
+      return {
+        type: 'function',
+        function: {
+          name: t.name || 'unknown_tool',
+          description: t.description || '',
+          parameters: t.parameters || { type: 'object', properties: {} },
+        },
+      };
     });
   }
 
-  // Format messages
-  const nativeMessages = messages.map((m) => {
-    const msg = { role: m.role, content: '' };
+  // Format messages (supporting Anthropic multi-part content, tool_use, and tool_result)
+  const nativeMessages = [];
+  for (const m of messages) {
     if (typeof m.content === 'string') {
-      msg.content = m.content;
+      nativeMessages.push({
+        role: m.role || 'user',
+        content: m.content,
+        ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
+        ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+        ...(m.name ? { name: m.name } : {}),
+      });
     } else if (Array.isArray(m.content)) {
-      // Anthropic content blocks
+      // Anthropic multi-part content blocks
       const textParts = [];
+      const toolCalls = [];
+      const toolResults = [];
+
       for (const part of m.content) {
-        if (part.type === 'text') textParts.push(part.text);
-        if (part.type === 'tool_result') {
-          msg.role = 'tool';
-          msg.tool_call_id = part.tool_use_id;
-          msg.content = typeof part.content === 'string' ? part.content : JSON.stringify(part.content);
-        }
-        if (part.type === 'tool_use') {
-          msg.role = 'assistant';
-          msg.tool_calls = [{
-            id: part.id,
+        if (!part) continue;
+        if (part.type === 'text') {
+          if (part.text) textParts.push(part.text);
+        } else if (part.type === 'tool_use') {
+          toolCalls.push({
+            id: part.id || `call_${crypto.randomUUID()}`,
             type: 'function',
             function: {
               name: part.name,
-              arguments: JSON.stringify(part.input || {}),
+              arguments: typeof part.input === 'string' ? part.input : JSON.stringify(part.input || {}),
             },
-          }];
+          });
+        } else if (part.type === 'tool_result') {
+          let resContent = '';
+          if (typeof part.content === 'string') {
+            resContent = part.content;
+          } else if (Array.isArray(part.content)) {
+            resContent = part.content.map(p => typeof p === 'string' ? p : (p.text || JSON.stringify(p))).join('\n');
+          } else if (part.content != null) {
+            resContent = JSON.stringify(part.content);
+          }
+          toolResults.push({
+            role: 'tool',
+            tool_call_id: part.tool_use_id,
+            content: resContent || 'Success',
+          });
         }
       }
-      if (!msg.content && textParts.length > 0) {
-        msg.content = textParts.join('\n');
+
+      if (m.role === 'assistant') {
+        const assistantMsg = {
+          role: 'assistant',
+          content: textParts.join('\n'),
+        };
+        if (toolCalls.length > 0) {
+          assistantMsg.tool_calls = toolCalls;
+        }
+        nativeMessages.push(assistantMsg);
+      } else {
+        if (textParts.length > 0) {
+          nativeMessages.push({
+            role: m.role || 'user',
+            content: textParts.join('\n'),
+          });
+        }
+        for (const tr of toolResults) {
+          nativeMessages.push(tr);
+        }
+        if (textParts.length === 0 && toolResults.length === 0) {
+          nativeMessages.push({
+            role: m.role || 'user',
+            content: '',
+          });
+        }
       }
+    } else {
+      nativeMessages.push({
+        role: m.role || 'user',
+        content: m.content != null ? String(m.content) : '',
+      });
     }
-
-    if (m.tool_calls) msg.tool_calls = m.tool_calls;
-    if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
-    if (m.name) msg.name = m.name;
-
-    return msg;
-  });
+  }
 
   const payload = {
     model: backendModel,
