@@ -577,6 +577,10 @@ app.post(['/v1/chat/completions', '/api/v1/chat/completions', '/chat/completions
     console.error(`[OpenAI ${PORT}] Direct API Error:`, err.message);
     if (!res.headersSent) {
       res.status(500).json({ error: { message: err.message, type: 'api_error', code: 'internal_error' } });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: { message: err.message, type: 'api_error' } })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
     }
   }
 });
@@ -933,6 +937,9 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
         type: 'error',
         error: { type: 'api_error', message: err.message },
       });
+    } else {
+      res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: err.message } })}\n\n`);
+      res.end();
     }
   }
 });

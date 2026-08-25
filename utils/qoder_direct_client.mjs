@@ -75,7 +75,7 @@ class QoderTokenManager {
 export const qoderTokenManager = new QoderTokenManager();
 
 /**
- * Model resolution for Qoder Cloud backend (Official 1-to-1 Mapping)
+ * Model resolution for Qoder Cloud backend (Direct API Verified Keys)
  */
 const MODEL_MAPPINGS = {
   // MiniMax
@@ -88,32 +88,35 @@ const MODEL_MAPPINGS = {
   'deepseek-v4': 'dmodel',
   'deepseek': 'dmodel',
   'dmodel': 'dmodel',
-  'deepseek-v4-flash': 'dfmodel',
-  'dfmodel': 'dfmodel',
+  'deepseek-v4-flash': 'deepseek-v4-flash',
+  'dfmodel': 'deepseek-v4-flash',
 
   // Qwen
-  'qwen3.8-max': 'qmodel_38max',
-  'qmodel_38max': 'qmodel_38max',
-  'qwen3.7-max': 'qmodel_latest',
-  'qmodel_latest': 'qmodel_latest',
+  'qwen3.8-max': 'qmodel',
+  'qmodel_38max': 'qmodel',
+  'qwen3.7-max': 'qmodel',
+  'qmodel_latest': 'qmodel',
   'qwen3.7-plus': 'qmodel',
   'qmodel': 'qmodel',
+  'qwen': 'qmodel',
 
   // GLM
   'glm-5.3': 'gmodel',
+  'glm-5.2': 'gmodel',
   'gmodel': 'gmodel',
-  'glm-5.2': 'gm51model',
-  'gm51model': 'gm51model',
+  'gm51model': 'gmodel',
+  'glm': 'gmodel',
 
   // Kimi
-  'kimi-k3': 'kmodel_latest',
-  'kmodel_latest': 'kmodel_latest',
+  'kimi-k3': 'kmodel',
+  'kmodel_latest': 'kmodel',
   'kimi-k2.7-code': 'kmodel',
   'kmodel': 'kmodel',
+  'kimi': 'kmodel',
 
   // Cantus
-  'cantus': 'cmodel',
-  'cmodel': 'cmodel',
+  'cantus': 'ultimate',
+  'cmodel': 'ultimate',
 
   // Preset categories
   'ultimate': 'ultimate',
@@ -133,8 +136,20 @@ const MODEL_MAPPINGS = {
 
 export function resolveDirectModelKey(modelInput) {
   if (!modelInput) return 'auto';
-  const clean = String(modelInput).toLowerCase().trim();
-  return MODEL_MAPPINGS[clean] || (clean.startsWith('m') ? 'mmodel' : 'auto');
+  const clean = String(modelInput).toLowerCase().trim().replace(/_/g, '-');
+  if (MODEL_MAPPINGS[clean]) return MODEL_MAPPINGS[clean];
+  const rawClean = String(modelInput).toLowerCase().trim();
+  if (MODEL_MAPPINGS[rawClean]) return MODEL_MAPPINGS[rawClean];
+  
+  if (rawClean.includes('qwen') || rawClean.startsWith('q')) return 'qmodel';
+  if (rawClean.includes('kimi') || rawClean.startsWith('k')) return 'kmodel';
+  if (rawClean.includes('glm') || rawClean.startsWith('g')) return 'gmodel';
+  if (rawClean.includes('flash')) return 'deepseek-v4-flash';
+  if (rawClean.includes('deepseek') || rawClean.startsWith('d')) return 'dmodel';
+  if (rawClean.includes('minimax') || rawClean.startsWith('m')) return 'mmodel';
+  if (rawClean.includes('cantus') || rawClean.startsWith('c')) return 'ultimate';
+  
+  return 'auto';
 }
 
 /**
@@ -146,35 +161,34 @@ export async function* streamDirectChatCompletion({
   tools,
   temperature,
   max_tokens,
-  personalToken,
   signal,
 }) {
-  const bearerToken = await qoderTokenManager.getBearerToken(personalToken);
+  const bearerToken = await qoderTokenManager.getBearerToken();
   const backendModel = resolveDirectModelKey(model);
   const reqId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
 
-  // Normalize tools for OpenAI format
+  // Convert OpenAI tool definitions to Qoder format
   let nativeTools = undefined;
   if (Array.isArray(tools) && tools.length > 0) {
     nativeTools = tools.map((t) => {
-      if (t.type === 'function') return t;
-      return {
-        type: 'function',
-        function: {
-          name: t.name || t.function?.name,
-          description: t.description || t.function?.description || '',
-          parameters: t.parameters || t.input_schema || t.function?.parameters || {},
-        },
-      };
+      if (t.type === 'function' && t.function) {
+        return {
+          type: 'function',
+          function: {
+            name: t.function.name,
+            description: t.function.description || '',
+            parameters: t.function.parameters || { type: 'object', properties: {} },
+          },
+        };
+      }
+      return t;
     });
   }
 
-  // Normalize messages
-  const nativeMessages = (messages || []).map((m) => {
-    const role = m.role === 'developer' ? 'system' : m.role;
-    const msg = { role };
-
+  // Format messages
+  const nativeMessages = messages.map((m) => {
+    const msg = { role: m.role, content: '' };
     if (typeof m.content === 'string') {
       msg.content = m.content;
     } else if (Array.isArray(m.content)) {
@@ -243,7 +257,9 @@ export async function* streamDirectChatCompletion({
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Qoder Cloud HTTP ${response.status}: ${errText}`);
+    let parsedErr = {};
+    try { parsedErr = JSON.parse(errText); } catch {}
+    throw new Error(`Qoder Cloud HTTP ${response.status}: ${parsedErr.message || errText}`);
   }
 
   const reader = response.body.getReader();
@@ -270,8 +286,14 @@ export async function* streamDirectChatCompletion({
 
           try {
             const parsed = JSON.parse(dataStr);
+            if (parsed.code || parsed.error || parsed.type === 'invalid_model_error') {
+              throw new Error(`Qoder Cloud Error [${parsed.code || parsed.type}]: ${parsed.message || JSON.stringify(parsed)}`);
+            }
             yield parsed;
-          } catch (_) {
+          } catch (e) {
+            if (e.message.startsWith('Qoder Cloud Error')) {
+              throw e;
+            }
             // Ignore malformed JSON chunks
           }
         }
