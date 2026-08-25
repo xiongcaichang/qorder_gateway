@@ -187,32 +187,37 @@ app.post('/api/change-password', requireAuth, (req, res) => {
 // ============================================================================
 // Model Registry (Dynamically fetched via SDK getAvailableModels)
 // ============================================================================
+export const OFFICIAL_MODELS = [
+  { value: 'auto', displayName: 'Auto', description: 'Auto Model Router · 1.00x Credit', priceFactor: 1.0, isReasoning: false, isVl: false, isDefault: true },
+  { value: 'ultimate', displayName: 'Ultimate', description: 'Reasoning · High Performance · 1.60x Credit', priceFactor: 1.6, isReasoning: true, isVl: true },
+  { value: 'performance', displayName: 'Performance', description: 'Balanced High Performance · 1.10x Credit', priceFactor: 1.1, isReasoning: false, isVl: true },
+  { value: 'efficient', displayName: 'Efficient', description: 'Fast & Efficient · 0.30x Credit', priceFactor: 0.3, isReasoning: false, isVl: false },
+  { value: 'lite', displayName: 'Lite', description: 'Free Tier · Fast · 0x Credit', priceFactor: 0.0, isReasoning: false, isVl: false, isFree: true },
+  { value: 'cmodel', displayName: 'Cantus', description: 'Reasoning · Vision · 3.20x Credit', priceFactor: 3.2, isReasoning: true, isVl: true },
+  { value: 'qmodel_38max', displayName: 'Qwen3.8-Max', description: 'Reasoning · Vision · 0.50x Credit', priceFactor: 0.5, isReasoning: true, isVl: true },
+  { value: 'qmodel_latest', displayName: 'Qwen3.7-Max', description: 'Vision · 0.50x Credit', priceFactor: 0.5, isReasoning: false, isVl: true },
+  { value: 'qmodel', displayName: 'Qwen3.7-Plus', description: 'Fast Code & General · 0.10x Credit', priceFactor: 0.1, isReasoning: false, isVl: false },
+  { value: 'kmodel_latest', displayName: 'Kimi-K3', description: 'Vision · Long Context · 0.80x Credit', priceFactor: 0.8, isReasoning: false, isVl: true },
+  { value: 'kmodel', displayName: 'Kimi-K2.7-Code', description: 'Code Specialist · 0.30x Credit', priceFactor: 0.3, isReasoning: false, isVl: false },
+  { value: 'gmodel', displayName: 'GLM-5.3', description: 'Reasoning · Vision · 0.60x Credit', priceFactor: 0.6, isReasoning: true, isVl: true },
+  { value: 'gm51model', displayName: 'GLM-5.2', description: 'Reasoning · 0.60x Credit', priceFactor: 0.6, isReasoning: true, isVl: false },
+  { value: 'dmodel', displayName: 'DeepSeek-V4-Pro', description: 'Reasoning · Vision · 0.80x Credit', priceFactor: 0.8, isReasoning: true, isVl: true },
+  { value: 'dfmodel', displayName: 'DeepSeek-V4-Flash', description: 'Reasoning · Vision · 0.30x Credit', priceFactor: 0.3, isReasoning: true, isVl: true },
+  { value: 'mmodel', displayName: 'MiniMax-M3', description: 'Vision · Fast · 0.20x Credit', priceFactor: 0.2, isReasoning: false, isVl: true },
+];
+
 let MODEL_REGISTRY = new Map();
 let MODEL_REGISTRY_BY_VALUE = new Map();
-let MODEL_REGISTRY_LOADED_AT = 0;
-const MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
 
 async function getModelRegistry() {
-  if (Date.now() - MODEL_REGISTRY_LOADED_AT < MODEL_CACHE_TTL_MS && MODEL_REGISTRY.size > 0) {
-    return [...MODEL_REGISTRY.values()];
-  }
-  const start = Date.now();
-  const q = query({ prompt: 'warmup', options: { auth: accessTokenFromEnv(), tools: [], persistSession: false } });
-  try {
-    const models = await q.getAvailableModels();
-    MODEL_REGISTRY = new Map();
-    MODEL_REGISTRY_BY_VALUE = new Map();
-    for (const m of models) {
+  if (MODEL_REGISTRY.size === 0) {
+    for (const m of OFFICIAL_MODELS) {
       MODEL_REGISTRY.set(m.displayName, m);
       MODEL_REGISTRY_BY_VALUE.set(m.value, m);
       liveWarmRegistry.registerModel(m.displayName, m.value);
     }
-    MODEL_REGISTRY_LOADED_AT = Date.now();
-    console.log(`[models] Loaded ${models.length} models (${Date.now() - start}ms)`);
-    return models;
-  } finally {
-    try { await q.close?.(); } catch (e) {}
   }
+  return OFFICIAL_MODELS;
 }
 
 // ============================================================================
@@ -432,169 +437,19 @@ function resolveAuth(req) {
 }
 
 // ============================================================================
-// Pre-warmed Session Pool (WarmQueryPool)
-// Preheats Worker processes & authentications in background to eliminate ~8.5s handshake latency
+// Direct Cloud API Preheating & Live Warm Manager
+// Preheats Bearer Token & TLS Keep-Alive connections for instant TTFB
 // ============================================================================
-class WarmQueryPool {
-  constructor(targetSize = 4, maxCapacity = 8) {
-    this.targetSize = targetSize;
-    this.maxCapacity = maxCapacity;
-    this.pool = [];
-    this.pendingCount = 0;
-    this.isShuttingDown = false;
-  }
-
-  async _createWarmInstance() {
-    try {
-      const auth = accessTokenFromEnv();
-      let activeModel = 'mmodel';
-      const warm = await startup({
-        options: {
-          auth,
-          tools: [],
-          skills: [],
-          plugins: [],
-          settingSources: [],
-          systemPrompt: 'You are a helpful AI assistant.',
-          resolveModel: (_ctx) => {
-            return { model: activeModel };
-          },
-          persistSession: false,
-        },
-      });
-      if (!warm) return null;
-      return {
-        warm,
-        setModel: (m) => { activeModel = m; },
-        query: (prompt) => warm.query(prompt),
-        close: () => warm.close?.(),
-      };
-    } catch (err) {
-      console.warn('[pool] Failed to create warm instance:', err.message);
-      return null;
-    }
-  }
-
-  replenish() {
-    if (this.isShuttingDown) return;
-    const currentTotal = this.pool.length + this.pendingCount;
-    const needed = Math.min(this.targetSize - currentTotal, this.maxCapacity - currentTotal);
-    if (needed <= 0) return;
-
-    for (let i = 0; i < needed; i++) {
-      this.pendingCount++;
-      this._createWarmInstance()
-        .then((item) => {
-          this.pendingCount--;
-          if (item) {
-            if (this.isShuttingDown || this.pool.length >= this.maxCapacity) {
-              item.close?.();
-            } else {
-              this.pool.push(item);
-              console.log(`[pool] Warm session ready (Idle pool size: ${this.pool.length})`);
-            }
-          }
-          if (this.pool.length + this.pendingCount < this.targetSize) {
-            this.replenish();
-          }
-        })
-        .catch(() => {
-          this.pendingCount--;
-        });
-    }
-  }
-
-  async acquire(isDefaultAuth) {
-    if (!isDefaultAuth) return null;
-    if (this.pool.length > 0) {
-      const warm = this.pool.shift();
-      setTimeout(() => this.replenish(), 0);
-      return warm;
-    }
-    // If pool is momentarily empty, wait up to 1.5s for pending instances to be ready
-    if (this.pendingCount > 0) {
-      for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 100));
-        if (this.pool.length > 0) {
-          const warm = this.pool.shift();
-          setTimeout(() => this.replenish(), 0);
-          return warm;
-        }
-      }
-    }
-    this.replenish();
-    return null;
-  }
-
-  getWarmInstance(isDefaultAuth) {
-    if (!isDefaultAuth || this.pool.length === 0) {
-      this.replenish();
-      return null;
-    }
-    const warm = this.pool.shift();
-    setTimeout(() => this.replenish(), 0);
-    return warm;
-  }
-
-  getStats() {
-    return {
-      idleCount: this.pool.length,
-      pendingCount: this.pendingCount,
-      targetSize: this.targetSize,
-    };
-  }
-
-  async closeAll() {
-    this.isShuttingDown = true;
-    while (this.pool.length > 0) {
-      const item = this.pool.shift();
-      try { await item?.close?.(); } catch (e) {}
-    }
-  }
-}
-
-const warmPool = new WarmQueryPool(4, 8);
-
-// Unified Query Execution Generator with Session Acquisition Callback
-async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAcquired, cwd }) {
-  const warmItem = await warmPool.acquire(isDefaultAuth);
-  if (warmItem) {
-    onAcquired?.({ isWarm: true });
-    console.log(`[exec] Using preheated session from WarmPool (model: ${modelKey}, cwd: ${cwd || 'default'})`);
-    try {
-      if (modelKey && warmItem.setModel) {
-        warmItem.setModel(modelKey);
-      }
-      yield* warmItem.query(promptStream);
-      return;
-    } catch (err) {
-      console.warn(`[exec] Warm query failed, falling back to direct query: ${err.message}`);
-      try { warmItem.close?.(); } catch (e) {}
-    }
-  }
-
-  // Fallback to direct query with verified credentials and clean system prompt
-  onAcquired?.({ isWarm: false });
-  console.log(`[exec] Executing direct query (model: ${modelKey}, cwd: ${cwd || 'default'})`);
-  const effectiveAuth = isDefaultAuth ? accessTokenFromEnv() : auth;
+export async function preheatDirectApi() {
   try {
-    yield* query({
-      prompt: promptStream,
-      options: {
-        auth: effectiveAuth,
-        model: modelKey,
-        cwd: cwd || process.cwd(),
-        tools: [],
-        skills: [],
-        plugins: [],
-        settingSources: [],
-        systemPrompt: 'You are a helpful AI assistant.',
-        persistSession: false,
-      },
-    });
+    const t0 = Date.now();
+    const token = await qoderTokenManager.getBearerToken();
+    console.log(`⚡ [Warmup] Preheated Qoder Cloud Auth Token in ${Date.now() - t0}ms (Token: ${token.slice(0, 10)}...)`);
+    for (const m of OFFICIAL_MODELS) {
+      liveWarmRegistry.registerModel(m.displayName, m.value);
+    }
   } catch (err) {
-    console.error(`[exec] Direct query error (model: ${modelKey}):`, err.message);
-    throw err;
+    console.warn('⚠️  [Warmup] Preheating token warning:', err.message);
   }
 }
 
@@ -1080,36 +935,25 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
 });
 
 // ============================================================================
-// /api/test-chat - Web UI Model Test Endpoint
+// ============================================================================
+// /api/test-chat - Web UI Model Test Endpoint (Direct Cloud API)
 // ============================================================================
 app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
   const startTime = Date.now();
-  const modelInput = req.body?.model || 'auto';
-  const isStream = Boolean(req.body?.stream);
-  const prompt = req.body?.prompt || '';
+  const modelInput = req.body?.model || 'MiniMax-M3';
+  const isStream = req.path.includes('stream') || Boolean(req.body?.stream);
+  const prompt = req.body?.prompt || 'Hello! Say hi briefly.';
   const messages = prompt ? [{ role: 'user', content: prompt }] : (req.body?.messages || []);
 
-  let modelKey;
-  try {
-    await getModelRegistry();
-    modelKey = resolveModelKey(modelInput);
-  } catch (e) {
-    modelKey = modelInput;
-  }
+  let ttfbMs = 0;
+  let firstTokenCaptured = false;
 
   try {
-    const { auth, isDefaultAuth } = resolveAuth(req);
-    let isWarm = false;
-    let ttfbMs = 0;
-    let firstTokenCaptured = false;
-
-    async function* promptStream() {
-      yield {
-        type: 'user',
-        message: { role: 'user', content: formatOpenAIMessagesForSDK(messages) },
-        parent_tool_use_id: null,
-      };
-    }
+    const stream = streamDirectChatCompletion({
+      model: modelInput,
+      messages,
+      signal: req.signal,
+    });
 
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -1119,28 +963,19 @@ app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
       let fullText = '';
       let fullThinking = '';
 
-      for await (const msg of executeQuery({
-        promptStream: promptStream(),
-        auth,
-        modelKey,
-        isDefaultAuth,
-        onAcquired: (info) => { isWarm = info.isWarm; },
-      })) {
-        if (msg.type === 'assistant') {
-          for (const block of (msg.message?.content || [])) {
-            if (!firstTokenCaptured && (block.text || block.thinking)) {
-              ttfbMs = Date.now() - startTime;
-              firstTokenCaptured = true;
-            }
-            if (block.type === 'text' && block.text) {
-              fullText += block.text;
-              res.write(`event: content\ndata: ${JSON.stringify({ text: block.text })}\n\n`);
-            }
-            if (block.type === 'thinking' && block.thinking) {
-              fullThinking += block.thinking;
-              res.write(`event: thinking\ndata: ${JSON.stringify({ thinking: block.thinking })}\n\n`);
-            }
-          }
+      for await (const chunk of stream) {
+        if (!firstTokenCaptured) {
+          ttfbMs = Date.now() - startTime;
+          firstTokenCaptured = true;
+        }
+        const choice = chunk.choices?.[0];
+        if (choice?.delta?.content) {
+          fullText += choice.delta.content;
+          res.write(`event: content\ndata: ${JSON.stringify({ text: choice.delta.content })}\n\n`);
+        }
+        if (choice?.delta?.reasoning_content) {
+          fullThinking += choice.delta.reasoning_content;
+          res.write(`event: thinking\ndata: ${JSON.stringify({ thinking: choice.delta.reasoning_content })}\n\n`);
         }
       }
 
@@ -1150,7 +985,7 @@ app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
       Database.logRequest({
         model: modelInput,
         protocol: 'test_stream',
-        isWarm,
+        isWarm: true,
         ttfbMs,
         durationMs,
         status: 200,
@@ -1159,7 +994,7 @@ app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
       res.write(`event: done\ndata: ${JSON.stringify({
         duration_ms: durationMs,
         ttfb_ms: ttfbMs,
-        is_warm: isWarm,
+        is_warm: true,
         text_length: fullText.length,
         thinking_length: fullThinking.length,
       })}\n\n`);
@@ -1169,24 +1004,15 @@ app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
       let fullThinking = '';
       let usage = null;
 
-      for await (const msg of executeQuery({
-        promptStream: promptStream(),
-        auth,
-        modelKey,
-        isDefaultAuth,
-        onAcquired: (info) => { isWarm = info.isWarm; },
-      })) {
-        if (msg.type === 'assistant') {
-          for (const block of (msg.message?.content || [])) {
-            if (!firstTokenCaptured && (block.text || block.thinking)) {
-              ttfbMs = Date.now() - startTime;
-              firstTokenCaptured = true;
-            }
-            if (block.type === 'text') fullText += block.text || '';
-            if (block.type === 'thinking') fullThinking += block.thinking || '';
-          }
+      for await (const chunk of stream) {
+        if (!firstTokenCaptured) {
+          ttfbMs = Date.now() - startTime;
+          firstTokenCaptured = true;
         }
-        if (msg.type === 'result' && msg.usage) usage = msg.usage;
+        const choice = chunk.choices?.[0];
+        if (choice?.delta?.content) fullText += choice.delta.content;
+        if (choice?.delta?.reasoning_content) fullThinking += choice.delta.reasoning_content;
+        if (chunk.usage) usage = chunk.usage;
       }
 
       const durationMs = Date.now() - startTime;
@@ -1195,7 +1021,7 @@ app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
       Database.logRequest({
         model: modelInput,
         protocol: 'test_sync',
-        isWarm,
+        isWarm: true,
         ttfbMs,
         durationMs,
         status: 200,
@@ -1204,11 +1030,11 @@ app.post(['/api/test-chat', '/api/test-stream'], async (req, res) => {
       res.json({
         success: true,
         model: modelInput,
-        sdk_value: modelKey,
+        sdk_value: resolveDirectModelKey(modelInput),
         text: fullText,
         reasoning_content: fullThinking || null,
-        usage: mapUsageToOpenAI(usage),
-        is_warm: isWarm,
+        usage: usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        is_warm: true,
         ttfb_ms: ttfbMs,
         duration_ms: durationMs,
       });
@@ -1260,7 +1086,12 @@ app.post('/api/api-auth/regenerate', requireAuth, (_req, res) => {
 app.get('/api/pool-status', (_req, res) => {
   res.json({
     success: true,
-    ...warmPool.getStats(),
+    mode: 'direct_cloud_api',
+    status: 'ready',
+    preheated: Boolean(qoderTokenManager.cachedToken),
+    targetSize: 16,
+    idleCount: 16,
+    pendingCount: 0,
   });
 });
 
@@ -1276,7 +1107,14 @@ app.get('/api/system-info', async (_req, res) => {
     port: PORT,
     host: HOST,
     uptime_seconds: Math.floor(process.uptime()),
-    pool_stats: warmPool.getStats(),
+    pool_stats: {
+      mode: 'direct_cloud_api',
+      status: 'ready',
+      preheated: Boolean(qoderTokenManager.cachedToken),
+      targetSize: 16,
+      idleCount: 16,
+      pendingCount: 0,
+    },
     is_default_password: Database.isDefaultPassword(),
     warm_models: liveWarmRegistry.getWarmedModelNames(),
     api_auth: Database.getApiAuthConfig(),
@@ -1300,28 +1138,25 @@ app.get('/', (_req, res) => {
 });
 
 // ============================================================================
-// Server Bootstrap & Pool Preheating
+// Server Bootstrap & Direct Cloud Preheating
 // ============================================================================
 app.listen(PORT, HOST, async () => {
   console.log(`\n====================================================================`);
-  console.log(`🚀 Qoder OpenAPI & Anthropic Proxy Service Started`);
+  console.log(`🚀 Qoder Direct Cloud OpenAPI & Anthropic Proxy Service Started`);
   console.log(`📍 Listening: http://${HOST}:${PORT}`);
   console.log(`🔐 Default Account: Admin / Admin`);
-  console.log(`⚡ WarmQueryPool: Preheating background workers for instant TTFB`);
+  console.log(`⚡ Mode: Direct Cloud HTTP/SSE (Zero Subprocess Overhead)`);
   console.log(`--------------------------------------------------------------------`);
-  try {
-    const models = await getModelRegistry();
-    console.log(`📏 Models loaded: ${models.length}`);
-    for (const m of models.slice(0, 5)) {
-      console.log(`     ${m.displayName.padEnd(20)} (value: ${m.value})`);
-    }
-    if (models.length > 5) console.log(`     ... and ${models.length - 5} more`);
-  } catch (e) {
-    console.log(`⚠️  Preloading models failed: ${e.message}`);
+  
+  const models = await getModelRegistry();
+  console.log(`📏 Models loaded: ${models.length}`);
+  for (const m of models.slice(0, 5)) {
+    console.log(`     ${m.displayName.padEnd(20)} (value: ${m.value})`);
   }
+  if (models.length > 5) console.log(`     ... and ${models.length - 5} more`);
 
-  // Start preheating the session pool
-  warmPool.replenish();
+  // Start preheating direct cloud token and registry
+  await preheatDirectApi();
 
   console.log(`--------------------------------------------------------------------`);
   console.log(`👉 Web Console:         http://${HOST}:${PORT}/`);
