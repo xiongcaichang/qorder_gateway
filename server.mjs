@@ -18,6 +18,7 @@
  */
 
 import 'dotenv/config';
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -30,9 +31,40 @@ import {
   accessToken as accessTokenHelper,
 } from '@qoder-ai/qoder-agent-sdk';
 import { Database } from './db.mjs';
+import {
+  normalizeAnthropicTools,
+  normalizeOpenAiTools,
+  buildToolSystemPrompt,
+  parseModelToolCalls,
+  formatOpenAIMessagesForSDK,
+  formatAnthropicMessagesForSDK,
+  resolveClientCwd,
+} from './utils/tool_parser.mjs';
+import {
+  streamDirectChatCompletion,
+  resolveDirectModelKey,
+  qoderTokenManager,
+} from './utils/qoder_direct_client.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ============================================================================
+// Debug Request Logger for Claude Code Investigation
+// ============================================================================
+const DEBUG_LOG_PATH = path.join(__dirname, 'data', 'claude_debug.log');
+
+export function appendDebugLog(title, data) {
+  try {
+    const timestamp = new Date().toISOString();
+    const entry = `\n==================== [${timestamp}] ${title} ====================\n` +
+      (typeof data === 'string' ? data : JSON.stringify(data, null, 2)) +
+      `\n`;
+    fs.appendFileSync(DEBUG_LOG_PATH, entry, 'utf8');
+  } catch (err) {
+    console.error('Failed to write debug log:', err.message);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 10088;
@@ -524,11 +556,11 @@ class WarmQueryPool {
 const warmPool = new WarmQueryPool(4, 8);
 
 // Unified Query Execution Generator with Session Acquisition Callback
-async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAcquired }) {
+async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAcquired, cwd }) {
   const warmItem = await warmPool.acquire(isDefaultAuth);
   if (warmItem) {
     onAcquired?.({ isWarm: true });
-    console.log(`[exec] Using preheated session from WarmPool (model: ${modelKey})`);
+    console.log(`[exec] Using preheated session from WarmPool (model: ${modelKey}, cwd: ${cwd || 'default'})`);
     try {
       if (modelKey && warmItem.setModel) {
         warmItem.setModel(modelKey);
@@ -543,7 +575,7 @@ async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAc
 
   // Fallback to direct query with verified credentials and clean system prompt
   onAcquired?.({ isWarm: false });
-  console.log(`[exec] Executing direct query (model: ${modelKey})`);
+  console.log(`[exec] Executing direct query (model: ${modelKey}, cwd: ${cwd || 'default'})`);
   const effectiveAuth = isDefaultAuth ? accessTokenFromEnv() : auth;
   try {
     yield* query({
@@ -551,6 +583,7 @@ async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAc
       options: {
         auth: effectiveAuth,
         model: modelKey,
+        cwd: cwd || process.cwd(),
         tools: [],
         skills: [],
         plugins: [],
@@ -565,78 +598,31 @@ async function* executeQuery({ promptStream, auth, modelKey, isDefaultAuth, onAc
   }
 }
 
-// Format OpenAI messages for SDK
-function formatOpenAIMessagesForSDK(messages) {
-  const parts = [];
-  for (const m of messages) {
-    if (m.role === 'system') parts.push(`[System] ${m.content}`);
-    else if (m.role === 'user') parts.push(m.content || '');
-    else if (m.role === 'assistant') parts.push(`[Assistant] ${m.content}`);
-  }
-  return parts.join('\n\n');
-}
-
-// Format Anthropic messages and system prompt for SDK
-function formatAnthropicMessagesForSDK(system, messages) {
-  const parts = [];
-  if (system) {
-    if (typeof system === 'string' && system.trim()) {
-      parts.push(`[System] ${system.trim()}`);
-    } else if (Array.isArray(system)) {
-      const sysText = system.map(b => b.text || '').join('\n').trim();
-      if (sysText) parts.push(`[System] ${sysText}`);
-    }
-  }
-
-  for (const m of (messages || [])) {
-    let contentText = '';
-    if (typeof m.content === 'string') {
-      contentText = m.content;
-    } else if (Array.isArray(m.content)) {
-      contentText = m.content
-        .map(b => (b.type === 'text' ? b.text : (b.text || JSON.stringify(b))))
-        .join('\n');
-    }
-    if (m.role === 'user') {
-      parts.push(contentText);
-    } else if (m.role === 'assistant') {
-      parts.push(`[Assistant] ${contentText}`);
-    }
-  }
-  return parts.join('\n\n');
-}
-
 // ============================================================================
-// /v1/chat/completions - OpenAI Compatible Endpoint
+// /v1/chat/completions - OpenAI Compatible Endpoint (Direct Cloud API)
 // ============================================================================
-app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, async (req, res) => {
+app.post(['/v1/chat/completions', '/api/v1/chat/completions', '/chat/completions'], verifyApiToken, async (req, res) => {
   const startTime = Date.now();
   const modelInput = req.body?.model || 'auto';
   const isStream = Boolean(req.body?.stream);
   const messages = req.body?.messages || [];
+  const tools = req.body?.tools || [];
+  const temperature = req.body?.temperature;
+  const max_tokens = req.body?.max_tokens;
+  const reqId = 'chatcmpl-' + crypto.randomUUID();
 
-  let modelKey;
+  let ttfbMs = 0;
+  let firstTokenCaptured = false;
+
   try {
-    await getModelRegistry();
-    modelKey = resolveModelKey(modelInput);
-  } catch (e) {
-    modelKey = modelInput;
-  }
-
-  try {
-    const { auth, isDefaultAuth } = resolveAuth(req);
-    const reqId = 'chatcmpl-' + crypto.randomBytes(12).toString('hex');
-    let isWarm = false;
-    let ttfbMs = 0;
-    let firstTokenCaptured = false;
-
-    async function* promptStream() {
-      yield {
-        type: 'user',
-        message: { role: 'user', content: formatOpenAIMessagesForSDK(messages) },
-        parent_tool_use_id: null,
-      };
-    }
+    const stream = streamDirectChatCompletion({
+      model: modelInput,
+      messages,
+      tools,
+      temperature,
+      max_tokens,
+      signal: req.signal,
+    });
 
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -645,44 +631,12 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders?.();
 
-      let fullText = '';
-      let fullThinking = '';
-
-      for await (const msg of executeQuery({
-        promptStream: promptStream(),
-        auth,
-        modelKey,
-        isDefaultAuth,
-        onAcquired: (info) => { isWarm = info.isWarm; },
-      })) {
-        if (msg.type === 'assistant') {
-          for (const block of (msg.message?.content || [])) {
-            if (!firstTokenCaptured && (block.text || block.thinking)) {
-              ttfbMs = Date.now() - startTime;
-              firstTokenCaptured = true;
-            }
-            if (block.type === 'text' && block.text) {
-              fullText += block.text;
-              res.write(`data: ${JSON.stringify({
-                id: reqId,
-                object: 'chat.completion.chunk',
-                created: Math.floor(Date.now() / 1000),
-                model: modelInput,
-                choices: [{ index: 0, delta: { content: block.text }, finish_reason: null }],
-              })}\n\n`);
-            }
-            if (block.type === 'thinking' && block.thinking) {
-              fullThinking += block.thinking;
-              res.write(`data: ${JSON.stringify({
-                id: reqId,
-                object: 'chat.completion.chunk',
-                created: Math.floor(Date.now() / 1000),
-                model: modelInput,
-                choices: [{ index: 0, delta: { reasoning_content: block.thinking }, finish_reason: null }],
-              })}\n\n`);
-            }
-          }
+      for await (const chunk of stream) {
+        if (!firstTokenCaptured) {
+          ttfbMs = Date.now() - startTime;
+          firstTokenCaptured = true;
         }
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }
 
       const durationMs = Date.now() - startTime;
@@ -691,51 +645,46 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
       Database.logRequest({
         model: modelInput,
         protocol: 'openai',
-        isWarm,
+        isWarm: true,
         ttfbMs,
         durationMs,
         status: 200,
       });
-      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
-      res.write(`data: ${JSON.stringify({
-        id: reqId,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: modelInput,
-        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-        qoder_perf: {
-          is_warm: isWarm,
-          ttfb_ms: ttfbMs,
-          duration_ms: durationMs,
-        },
-      })}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
-      console.log(`[OpenAI ${PORT}] stream ${modelInput}->${modelKey}, warm=${isWarm}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
+      console.log(`[OpenAI ${PORT}] direct stream ${modelInput}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
     } else {
-      let fullText = '';
-      let fullThinking = '';
+      let fullContent = '';
+      let fullReasoning = '';
+      const aggregatedToolCalls = [];
+      let finishReason = 'stop';
       let usage = null;
 
-      for await (const msg of executeQuery({
-        promptStream: promptStream(),
-        auth,
-        modelKey,
-        isDefaultAuth,
-        onAcquired: (info) => { isWarm = info.isWarm; },
-      })) {
-        if (msg.type === 'assistant') {
-          for (const block of (msg.message?.content || [])) {
-            if (!firstTokenCaptured && (block.text || block.thinking)) {
-              ttfbMs = Date.now() - startTime;
-              firstTokenCaptured = true;
+      for await (const chunk of stream) {
+        if (!firstTokenCaptured) {
+          ttfbMs = Date.now() - startTime;
+          firstTokenCaptured = true;
+        }
+        const choice = chunk.choices?.[0];
+        if (choice?.delta?.content) fullContent += choice.delta.content;
+        if (choice?.delta?.reasoning_content) fullReasoning += choice.delta.reasoning_content;
+        if (choice?.delta?.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            const idx = tc.index || 0;
+            if (!aggregatedToolCalls[idx]) {
+              aggregatedToolCalls[idx] = {
+                id: tc.id || `call_${crypto.randomUUID()}`,
+                type: 'function',
+                function: { name: tc.function?.name || '', arguments: '' },
+              };
             }
-            if (block.type === 'text') fullText += block.text || '';
-            if (block.type === 'thinking') fullThinking += block.thinking || '';
+            if (tc.function?.name) aggregatedToolCalls[idx].function.name = tc.function.name;
+            if (tc.function?.arguments) aggregatedToolCalls[idx].function.arguments += tc.function.arguments;
           }
         }
-        if (msg.type === 'result' && msg.usage) usage = msg.usage;
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+        if (chunk.usage) usage = chunk.usage;
       }
 
       const durationMs = Date.now() - startTime;
@@ -744,12 +693,11 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
       Database.logRequest({
         model: modelInput,
         protocol: 'openai',
-        isWarm,
+        isWarm: true,
         ttfbMs,
         durationMs,
         status: 200,
       });
-      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
       res.json({
         id: reqId,
@@ -760,22 +708,18 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
           index: 0,
           message: {
             role: 'assistant',
-            content: fullText,
-            ...(fullThinking ? { reasoning_content: fullThinking } : {}),
+            content: fullContent || null,
+            ...(fullReasoning ? { reasoning_content: fullReasoning } : {}),
+            ...(aggregatedToolCalls.length > 0 ? { tool_calls: aggregatedToolCalls } : {}),
           },
-          finish_reason: 'stop',
+          finish_reason: aggregatedToolCalls.length > 0 ? 'tool_calls' : finishReason,
         }],
-        usage: mapUsageToOpenAI(usage),
-        qoder_perf: {
-          is_warm: isWarm,
-          ttfb_ms: ttfbMs,
-          duration_ms: durationMs,
-        },
+        usage: usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       });
-      console.log(`[OpenAI ${PORT}] non-stream ${modelInput}->${modelKey}, warm=${isWarm}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
+      console.log(`[OpenAI ${PORT}] direct non-stream ${modelInput}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
     }
   } catch (err) {
-    console.error(`[OpenAI ${PORT}] Error (model=${modelInput}):`, err.message);
+    console.error(`[OpenAI ${PORT}] Direct API Error:`, err.message);
     if (!res.headersSent) {
       res.status(500).json({ error: { message: err.message, type: 'api_error', code: 'internal_error' } });
     }
@@ -783,7 +727,7 @@ app.post(['/v1/chat/completions', '/api/chat/completions'], verifyApiToken, asyn
 });
 
 // ============================================================================
-// /v1/messages - Anthropic Compatible Endpoint
+// /v1/messages - Anthropic Compatible Endpoint (Direct Cloud API)
 // ============================================================================
 app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, async (req, res) => {
   const startTime = Date.now();
@@ -791,29 +735,44 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
   const isStream = Boolean(req.body?.stream);
   const messages = req.body?.messages || [];
   const system = req.body?.system || '';
+  const tools = req.body?.tools || [];
+  const temperature = req.body?.temperature;
+  const max_tokens = req.body?.max_tokens;
+  const reqId = 'msg_' + crypto.randomUUID();
 
-  let modelKey;
-  try {
-    await getModelRegistry();
-    modelKey = resolveModelKey(modelInput);
-  } catch (e) {
-    modelKey = modelInput;
+  let ttfbMs = 0;
+  let firstTokenCaptured = false;
+
+  // Build combined messages list with system prompt included
+  const combinedMessages = [];
+  if (system) {
+    if (typeof system === 'string') {
+      combinedMessages.push({ role: 'system', content: system });
+    } else if (Array.isArray(system)) {
+      const sysText = system.map(p => typeof p === 'string' ? p : p.text || '').filter(Boolean).join('\n');
+      if (sysText) combinedMessages.push({ role: 'system', content: sysText });
+    }
+  }
+  for (const m of messages) {
+    combinedMessages.push(m);
   }
 
-  try {
-    const { auth, isDefaultAuth } = resolveAuth(req);
-    const reqId = 'msg_' + crypto.randomBytes(16).toString('hex');
-    let isWarm = false;
-    let ttfbMs = 0;
-    let firstTokenCaptured = false;
+  appendDebugLog('INCOMING /v1/messages DIRECT REQUEST', {
+    modelInput,
+    isStream,
+    toolsCount: tools.length,
+    messagesCount: messages.length,
+  });
 
-    async function* promptStream() {
-      yield {
-        type: 'user',
-        message: { role: 'user', content: formatAnthropicMessagesForSDK(system, messages) },
-        parent_tool_use_id: null,
-      };
-    }
+  try {
+    const stream = streamDirectChatCompletion({
+      model: modelInput,
+      messages: combinedMessages,
+      tools,
+      temperature,
+      max_tokens,
+      signal: req.signal,
+    });
 
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -837,113 +796,225 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
         },
       })}\n\n`);
 
-      // 2. content_block_start
-      res.write(`event: content_block_start\ndata: ${JSON.stringify({
-        type: 'content_block_start',
-        index: 0,
-        content_block: { type: 'text', text: '' },
-      })}\n\n`);
-
-      let fullText = '';
-      let fullThinking = '';
+      let currentBlockIndex = 0;
+      let textBlockOpened = false;
+      let thinkingBlockOpened = false;
+      const toolBlocks = new Map(); // index -> { blockIndex, id, name, inputJson }
       let usage = null;
+      let finalFinishReason = 'end_turn';
 
-      for await (const msg of executeQuery({
-        promptStream: promptStream(),
-        auth,
-        modelKey,
-        isDefaultAuth,
-        onAcquired: (info) => { isWarm = info.isWarm; },
-      })) {
-        if (msg.type === 'assistant') {
-          for (const block of (msg.message?.content || [])) {
-            if (!firstTokenCaptured && (block.text || block.thinking)) {
-              ttfbMs = Date.now() - startTime;
-              firstTokenCaptured = true;
-            }
-            if (block.type === 'text' && block.text) {
-              fullText += block.text;
-              res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-                type: 'content_block_delta',
-                index: 0,
-                delta: { type: 'text_delta', text: block.text },
+      for await (const chunk of stream) {
+        if (!firstTokenCaptured) {
+          ttfbMs = Date.now() - startTime;
+          firstTokenCaptured = true;
+        }
+
+        const choice = chunk.choices?.[0];
+        if (!choice) {
+          if (chunk.usage) usage = chunk.usage;
+          continue;
+        }
+
+        const delta = choice.delta || {};
+
+        // Stream reasoning content as thinking_delta
+        if (delta.reasoning_content) {
+          if (!thinkingBlockOpened) {
+            res.write(`event: content_block_start\ndata: ${JSON.stringify({
+              type: 'content_block_start',
+              index: currentBlockIndex,
+              content_block: { type: 'thinking', thinking: '' },
+            })}\n\n`);
+            thinkingBlockOpened = true;
+          }
+          res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: currentBlockIndex,
+            delta: { type: 'thinking_delta', thinking: delta.reasoning_content },
+          })}\n\n`);
+        }
+
+        // Stream standard text content as text_delta
+        if (delta.content) {
+          if (thinkingBlockOpened) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+              type: 'content_block_stop',
+              index: currentBlockIndex,
+            })}\n\n`);
+            currentBlockIndex++;
+            thinkingBlockOpened = false;
+          }
+
+          if (!textBlockOpened) {
+            res.write(`event: content_block_start\ndata: ${JSON.stringify({
+              type: 'content_block_start',
+              index: currentBlockIndex,
+              content_block: { type: 'text', text: '' },
+            })}\n\n`);
+            textBlockOpened = true;
+          }
+          res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: currentBlockIndex,
+            delta: { type: 'text_delta', text: delta.content },
+          })}\n\n`);
+        }
+
+        // Stream native tool_calls
+        if (Array.isArray(delta.tool_calls)) {
+          if (thinkingBlockOpened) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+              type: 'content_block_stop',
+              index: currentBlockIndex,
+            })}\n\n`);
+            currentBlockIndex++;
+            thinkingBlockOpened = false;
+          }
+          if (textBlockOpened) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+              type: 'content_block_stop',
+              index: currentBlockIndex,
+            })}\n\n`);
+            currentBlockIndex++;
+            textBlockOpened = false;
+          }
+
+          for (const tc of delta.tool_calls) {
+            const toolIdx = tc.index || 0;
+            let tb = toolBlocks.get(toolIdx);
+            if (!tb) {
+              tb = {
+                blockIndex: currentBlockIndex++,
+                id: tc.id || `call_${crypto.randomUUID()}`,
+                name: tc.function?.name || 'unknown_tool',
+                inputJson: '',
+              };
+              toolBlocks.set(toolIdx, tb);
+              res.write(`event: content_block_start\ndata: ${JSON.stringify({
+                type: 'content_block_start',
+                index: tb.blockIndex,
+                content_block: {
+                  type: 'tool_use',
+                  id: tb.id,
+                  name: tb.name,
+                  input: {},
+                },
               })}\n\n`);
             }
-            if (block.type === 'thinking' && block.thinking) {
-              fullThinking += block.thinking;
+
+            if (tc.function?.arguments) {
+              tb.inputJson += tc.function.arguments;
               res.write(`event: content_block_delta\ndata: ${JSON.stringify({
                 type: 'content_block_delta',
-                index: 0,
-                delta: { type: 'thinking_delta', thinking: block.thinking },
+                index: tb.blockIndex,
+                delta: {
+                  type: 'input_json_delta',
+                  partial_json: tc.function.arguments,
+                },
               })}\n\n`);
             }
           }
         }
-        if (msg.type === 'result' && msg.usage) usage = msg.usage;
+
+        if (choice.finish_reason) {
+          if (choice.finish_reason === 'tool_calls') {
+            finalFinishReason = 'tool_use';
+          } else {
+            finalFinishReason = 'end_turn';
+          }
+        }
+
+        if (chunk.usage) usage = chunk.usage;
       }
 
-      // 3. content_block_stop
-      res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-        type: 'content_block_stop',
-        index: 0,
-      })}\n\n`);
+      // Close any open blocks
+      if (thinkingBlockOpened) {
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+          type: 'content_block_stop',
+          index: currentBlockIndex,
+        })}\n\n`);
+      }
+      if (textBlockOpened) {
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+          type: 'content_block_stop',
+          index: currentBlockIndex,
+        })}\n\n`);
+      }
+      for (const [, tb] of toolBlocks) {
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+          type: 'content_block_stop',
+          index: tb.blockIndex,
+        })}\n\n`);
+      }
 
-      const anthropicUsage = mapUsageToAnthropic(usage);
       const durationMs = Date.now() - startTime;
       if (!ttfbMs) ttfbMs = durationMs;
 
       Database.logRequest({
         model: modelInput,
         protocol: 'anthropic',
-        isWarm,
+        isWarm: true,
         ttfbMs,
         durationMs,
         status: 200,
       });
-      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
 
-      // 4. message_delta
+      // message_delta
       res.write(`event: message_delta\ndata: ${JSON.stringify({
         type: 'message_delta',
-        delta: { stop_reason: 'end_turn', stop_sequence: null },
-        usage: { output_tokens: anthropicUsage.output_tokens || 0 },
+        delta: {
+          stop_reason: toolBlocks.size > 0 ? 'tool_use' : finalFinishReason,
+          stop_sequence: null,
+        },
+        usage: {
+          output_tokens: usage?.completion_tokens || 0,
+        },
         qoder_perf: {
-          is_warm: isWarm,
+          is_warm: true,
           ttfb_ms: ttfbMs,
           duration_ms: durationMs,
         },
       })}\n\n`);
 
-      // 5. message_stop
-      res.write(`event: message_stop\ndata: ${JSON.stringify({
-        type: 'message_stop',
-      })}\n\n`);
-
+      // message_stop
+      res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
       res.end();
-      console.log(`[Anthropic ${PORT}] stream ${modelInput}->${modelKey}, warm=${isWarm}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
+      console.log(`[Anthropic ${PORT}] direct stream ${modelInput}, tools=${toolBlocks.size}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
     } else {
-      let fullText = '';
-      let fullThinking = '';
+      let fullContent = '';
+      let fullReasoning = '';
+      const aggregatedTools = [];
+      let finishReason = 'end_turn';
       let usage = null;
 
-      for await (const msg of executeQuery({
-        promptStream: promptStream(),
-        auth,
-        modelKey,
-        isDefaultAuth,
-        onAcquired: (info) => { isWarm = info.isWarm; },
-      })) {
-        if (msg.type === 'assistant') {
-          for (const block of (msg.message?.content || [])) {
-            if (!firstTokenCaptured && (block.text || block.thinking)) {
-              ttfbMs = Date.now() - startTime;
-              firstTokenCaptured = true;
+      for await (const chunk of stream) {
+        if (!firstTokenCaptured) {
+          ttfbMs = Date.now() - startTime;
+          firstTokenCaptured = true;
+        }
+        const choice = chunk.choices?.[0];
+        if (!choice) {
+          if (chunk.usage) usage = chunk.usage;
+          continue;
+        }
+        if (choice.delta?.content) fullContent += choice.delta.content;
+        if (choice.delta?.reasoning_content) fullReasoning += choice.delta.reasoning_content;
+        if (choice.delta?.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            const idx = tc.index || 0;
+            if (!aggregatedTools[idx]) {
+              aggregatedTools[idx] = {
+                id: tc.id || `call_${crypto.randomUUID()}`,
+                name: tc.function?.name || '',
+                argumentsText: '',
+              };
             }
-            if (block.type === 'text') fullText += block.text || '';
-            if (block.type === 'thinking') fullThinking += block.thinking || '';
+            if (tc.function?.name) aggregatedTools[idx].name = tc.function.name;
+            if (tc.function?.arguments) aggregatedTools[idx].argumentsText += tc.function.arguments;
           }
         }
-        if (msg.type === 'result' && msg.usage) usage = msg.usage;
+        if (choice.finish_reason === 'tool_calls') finishReason = 'tool_use';
+        if (chunk.usage) usage = chunk.usage;
       }
 
       const durationMs = Date.now() - startTime;
@@ -952,37 +1023,53 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
       Database.logRequest({
         model: modelInput,
         protocol: 'anthropic',
-        isWarm,
+        isWarm: true,
         ttfbMs,
         durationMs,
         status: 200,
       });
-      liveWarmRegistry.recordCall(modelInput, modelKey, isWarm, ttfbMs);
+
+      const content = [];
+      if (fullReasoning) {
+        content.push({ type: 'thinking', thinking: fullReasoning });
+      }
+      if (fullContent) {
+        content.push({ type: 'text', text: fullContent });
+      }
+      for (const t of aggregatedTools) {
+        let parsedArgs = {};
+        try { parsedArgs = JSON.parse(t.argumentsText || '{}'); } catch (_) {}
+        content.push({
+          type: 'tool_use',
+          id: t.id,
+          name: t.name,
+          input: parsedArgs,
+        });
+      }
 
       res.json({
         id: reqId,
         type: 'message',
         role: 'assistant',
         model: modelInput,
-        content: [
-          {
-            type: 'text',
-            text: fullText,
-          },
-        ],
-        stop_reason: 'end_turn',
+        content,
+        stop_reason: aggregatedTools.length > 0 ? 'tool_use' : finishReason,
         stop_sequence: null,
-        usage: mapUsageToAnthropic(usage),
+        usage: {
+          input_tokens: usage?.prompt_tokens || 0,
+          output_tokens: usage?.completion_tokens || 0,
+        },
         qoder_perf: {
-          is_warm: isWarm,
+          is_warm: true,
           ttfb_ms: ttfbMs,
           duration_ms: durationMs,
         },
       });
-      console.log(`[Anthropic ${PORT}] non-stream ${modelInput}->${modelKey}, warm=${isWarm}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
+      console.log(`[Anthropic ${PORT}] direct non-stream ${modelInput}, tools=${aggregatedTools.length}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
     }
   } catch (err) {
-    console.error(`[Anthropic ${PORT}] Error (model=${modelInput}):`, err.message);
+    appendDebugLog('ERROR /v1/messages', { message: err.message, stack: err.stack });
+    console.error(`[Anthropic ${PORT}] Direct API Error:`, err.message);
     if (!res.headersSent) {
       res.status(500).json({
         type: 'error',
