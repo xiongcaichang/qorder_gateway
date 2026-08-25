@@ -657,11 +657,20 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
       })}\n\n`);
 
       let currentBlockIndex = 0;
-      let textBlockOpened = false;
-      let thinkingBlockOpened = false;
-      const toolBlocks = new Map(); // index -> { blockIndex, id, name, inputJson }
+      let activeBlock = null; // { type: 'thinking' | 'text' | 'tool_use', index: number, toolIdx?: number, tb?: object }
+      const toolBlocks = new Map(); // toolIdx -> { toolIdx, blockIndex, id, name, argumentsText }
       let usage = null;
       let finalFinishReason = 'end_turn';
+
+      const closeActiveBlock = () => {
+        if (activeBlock) {
+          res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+            type: 'content_block_stop',
+            index: activeBlock.index,
+          })}\n\n`);
+          activeBlock = null;
+        }
+      };
 
       for await (const chunk of stream) {
         if (!firstTokenCaptured) {
@@ -679,77 +688,66 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
 
         // Stream reasoning content as thinking_delta
         if (delta.reasoning_content) {
-          if (!thinkingBlockOpened) {
+          if (!activeBlock || activeBlock.type !== 'thinking') {
+            closeActiveBlock();
+            const blockIndex = currentBlockIndex++;
+            activeBlock = { type: 'thinking', index: blockIndex };
             res.write(`event: content_block_start\ndata: ${JSON.stringify({
               type: 'content_block_start',
-              index: currentBlockIndex,
+              index: blockIndex,
               content_block: { type: 'thinking', thinking: '' },
             })}\n\n`);
-            thinkingBlockOpened = true;
           }
           res.write(`event: content_block_delta\ndata: ${JSON.stringify({
             type: 'content_block_delta',
-            index: currentBlockIndex,
+            index: activeBlock.index,
             delta: { type: 'thinking_delta', thinking: delta.reasoning_content },
           })}\n\n`);
         }
 
         // Stream standard text content as text_delta
         if (delta.content) {
-          if (thinkingBlockOpened) {
-            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-              type: 'content_block_stop',
-              index: currentBlockIndex,
-            })}\n\n`);
-            currentBlockIndex++;
-            thinkingBlockOpened = false;
-          }
-
-          if (!textBlockOpened) {
+          if (!activeBlock || activeBlock.type !== 'text') {
+            closeActiveBlock();
+            const blockIndex = currentBlockIndex++;
+            activeBlock = { type: 'text', index: blockIndex };
             res.write(`event: content_block_start\ndata: ${JSON.stringify({
               type: 'content_block_start',
-              index: currentBlockIndex,
+              index: blockIndex,
               content_block: { type: 'text', text: '' },
             })}\n\n`);
-            textBlockOpened = true;
           }
           res.write(`event: content_block_delta\ndata: ${JSON.stringify({
             type: 'content_block_delta',
-            index: currentBlockIndex,
+            index: activeBlock.index,
             delta: { type: 'text_delta', text: delta.content },
           })}\n\n`);
         }
 
         // Stream native tool_calls
         if (Array.isArray(delta.tool_calls)) {
-          if (thinkingBlockOpened) {
-            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-              type: 'content_block_stop',
-              index: currentBlockIndex,
-            })}\n\n`);
-            currentBlockIndex++;
-            thinkingBlockOpened = false;
-          }
-          if (textBlockOpened) {
-            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-              type: 'content_block_stop',
-              index: currentBlockIndex,
-            })}\n\n`);
-            currentBlockIndex++;
-            textBlockOpened = false;
-          }
-
           for (const tc of delta.tool_calls) {
             const toolIdx = tc.index || 0;
             let tb = toolBlocks.get(toolIdx);
             if (!tb) {
               tb = {
-                blockIndex: currentBlockIndex++,
-                id: tc.id || `call_${crypto.randomUUID()}`,
+                toolIdx,
+                id: tc.id || `call_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`,
                 name: tc.function?.name || 'unknown_tool',
-                inputJson: '',
+                argumentsText: '',
+                blockIndex: -1,
               };
               toolBlocks.set(toolIdx, tb);
+            }
+            if (tc.function?.name && (!tb.name || tb.name === 'unknown_tool')) {
+              tb.name = tc.function.name;
+            }
+
+            // If active block is not this tool block, close current and open this tool
+            if (!activeBlock || activeBlock.type !== 'tool_use' || activeBlock.toolIdx !== toolIdx) {
+              closeActiveBlock();
+              tb.blockIndex = currentBlockIndex++;
+              activeBlock = { type: 'tool_use', index: tb.blockIndex, toolIdx, tb };
               res.write(`event: content_block_start\ndata: ${JSON.stringify({
                 type: 'content_block_start',
                 index: tb.blockIndex,
@@ -763,7 +761,7 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
             }
 
             if (tc.function?.arguments) {
-              tb.inputJson += tc.function.arguments;
+              tb.argumentsText += tc.function.arguments;
               res.write(`event: content_block_delta\ndata: ${JSON.stringify({
                 type: 'content_block_delta',
                 index: tb.blockIndex,
@@ -787,25 +785,8 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
         if (chunk.usage) usage = chunk.usage;
       }
 
-      // Close any open blocks
-      if (thinkingBlockOpened) {
-        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-          type: 'content_block_stop',
-          index: currentBlockIndex,
-        })}\n\n`);
-      }
-      if (textBlockOpened) {
-        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-          type: 'content_block_stop',
-          index: currentBlockIndex,
-        })}\n\n`);
-      }
-      for (const [, tb] of toolBlocks) {
-        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
-          type: 'content_block_stop',
-          index: tb.blockIndex,
-        })}\n\n`);
-      }
+      // Close the final active block
+      closeActiveBlock();
 
       const durationMs = Date.now() - startTime;
       if (!ttfbMs) ttfbMs = durationMs;
