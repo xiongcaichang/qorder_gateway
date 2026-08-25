@@ -657,18 +657,45 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
       })}\n\n`);
 
       let currentBlockIndex = 0;
-      let activeBlock = null; // { type: 'thinking' | 'text' | 'tool_use', index: number, toolIdx?: number, tb?: object }
-      const toolBlocks = new Map(); // toolIdx -> { toolIdx, blockIndex, id, name, argumentsText }
+      let thinkingOpened = false;
+      let textOpened = false;
+      let currentTool = null; // { toolIdx, blockIndex, id, name, bufferedArgs, startEmitted }
+      let toolCallCount = 0;
       let usage = null;
       let finalFinishReason = 'end_turn';
 
-      const closeActiveBlock = () => {
-        if (activeBlock) {
+      const closeCurrentTool = () => {
+        if (currentTool) {
+          if (!currentTool.startEmitted) {
+            currentTool.blockIndex = currentBlockIndex++;
+            toolCallCount++;
+            res.write(`event: content_block_start\ndata: ${JSON.stringify({
+              type: 'content_block_start',
+              index: currentTool.blockIndex,
+              content_block: {
+                type: 'tool_use',
+                id: currentTool.id,
+                name: currentTool.name || (tools[0]?.name || 'Bash'),
+                input: {},
+              },
+            })}\n\n`);
+            if (currentTool.bufferedArgs) {
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                type: 'content_block_delta',
+                index: currentTool.blockIndex,
+                delta: {
+                  type: 'input_json_delta',
+                  partial_json: currentTool.bufferedArgs,
+                },
+              })}\n\n`);
+            }
+            currentTool.startEmitted = true;
+          }
           res.write(`event: content_block_stop\ndata: ${JSON.stringify({
             type: 'content_block_stop',
-            index: activeBlock.index,
+            index: currentTool.blockIndex,
           })}\n\n`);
-          activeBlock = null;
+          currentTool = null;
         }
       };
 
@@ -688,88 +715,118 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
 
         // Stream reasoning content as thinking_delta
         if (delta.reasoning_content) {
-          if (!activeBlock || activeBlock.type !== 'thinking') {
-            closeActiveBlock();
-            const blockIndex = currentBlockIndex++;
-            activeBlock = { type: 'thinking', index: blockIndex };
+          if (!thinkingOpened) {
             res.write(`event: content_block_start\ndata: ${JSON.stringify({
               type: 'content_block_start',
-              index: blockIndex,
+              index: currentBlockIndex,
               content_block: { type: 'thinking', thinking: '' },
             })}\n\n`);
+            thinkingOpened = true;
           }
           res.write(`event: content_block_delta\ndata: ${JSON.stringify({
             type: 'content_block_delta',
-            index: activeBlock.index,
+            index: currentBlockIndex,
             delta: { type: 'thinking_delta', thinking: delta.reasoning_content },
           })}\n\n`);
         }
 
         // Stream standard text content as text_delta
         if (delta.content) {
-          if (!activeBlock || activeBlock.type !== 'text') {
-            closeActiveBlock();
-            const blockIndex = currentBlockIndex++;
-            activeBlock = { type: 'text', index: blockIndex };
+          if (thinkingOpened) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+              type: 'content_block_stop',
+              index: currentBlockIndex++,
+            })}\n\n`);
+            thinkingOpened = false;
+          }
+          if (!textOpened) {
             res.write(`event: content_block_start\ndata: ${JSON.stringify({
               type: 'content_block_start',
-              index: blockIndex,
+              index: currentBlockIndex,
               content_block: { type: 'text', text: '' },
             })}\n\n`);
+            textOpened = true;
           }
           res.write(`event: content_block_delta\ndata: ${JSON.stringify({
             type: 'content_block_delta',
-            index: activeBlock.index,
+            index: currentBlockIndex,
             delta: { type: 'text_delta', text: delta.content },
           })}\n\n`);
         }
 
         // Stream native tool_calls
         if (Array.isArray(delta.tool_calls)) {
+          if (thinkingOpened) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+              type: 'content_block_stop',
+              index: currentBlockIndex++,
+            })}\n\n`);
+            thinkingOpened = false;
+          }
+          if (textOpened) {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+              type: 'content_block_stop',
+              index: currentBlockIndex++,
+            })}\n\n`);
+            textOpened = false;
+          }
+
           for (const tc of delta.tool_calls) {
             const toolIdx = tc.index || 0;
-            let tb = toolBlocks.get(toolIdx);
-            if (!tb) {
-              tb = {
-                toolIdx,
-                id: tc.id || `call_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`,
-                name: tc.function?.name || 'unknown_tool',
-                argumentsText: '',
-                blockIndex: -1,
-              };
-              toolBlocks.set(toolIdx, tb);
-            }
-            if (tc.function?.name && (!tb.name || tb.name === 'unknown_tool')) {
-              tb.name = tc.function.name;
+            if (currentTool && currentTool.toolIdx !== toolIdx) {
+              closeCurrentTool();
             }
 
-            // If active block is not this tool block, close current and open this tool
-            if (!activeBlock || activeBlock.type !== 'tool_use' || activeBlock.toolIdx !== toolIdx) {
-              closeActiveBlock();
-              tb.blockIndex = currentBlockIndex++;
-              activeBlock = { type: 'tool_use', index: tb.blockIndex, toolIdx, tb };
+            if (!currentTool) {
+              currentTool = {
+                toolIdx,
+                blockIndex: -1,
+                id: tc.id || `call_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`,
+                name: tc.function?.name || '',
+                bufferedArgs: '',
+                startEmitted: false,
+              };
+            }
+
+            if (tc.id && !currentTool.id) currentTool.id = tc.id;
+            if (tc.function?.name && !currentTool.name) currentTool.name = tc.function.name;
+            if (tc.function?.arguments) currentTool.bufferedArgs += tc.function.arguments;
+
+            if (currentTool.name && !currentTool.startEmitted) {
+              currentTool.blockIndex = currentBlockIndex++;
+              toolCallCount++;
               res.write(`event: content_block_start\ndata: ${JSON.stringify({
                 type: 'content_block_start',
-                index: tb.blockIndex,
+                index: currentTool.blockIndex,
                 content_block: {
                   type: 'tool_use',
-                  id: tb.id,
-                  name: tb.name,
+                  id: currentTool.id,
+                  name: currentTool.name,
                   input: {},
                 },
               })}\n\n`);
-            }
-
-            if (tc.function?.arguments) {
-              tb.argumentsText += tc.function.arguments;
+              currentTool.startEmitted = true;
+              if (currentTool.bufferedArgs) {
+                res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                  type: 'content_block_delta',
+                  index: currentTool.blockIndex,
+                  delta: {
+                    type: 'input_json_delta',
+                    partial_json: currentTool.bufferedArgs,
+                  },
+                })}\n\n`);
+                currentTool.bufferedArgs = '';
+              }
+            } else if (currentTool.startEmitted && currentTool.bufferedArgs) {
               res.write(`event: content_block_delta\ndata: ${JSON.stringify({
                 type: 'content_block_delta',
-                index: tb.blockIndex,
+                index: currentTool.blockIndex,
                 delta: {
                   type: 'input_json_delta',
-                  partial_json: tc.function.arguments,
+                  partial_json: currentTool.bufferedArgs,
                 },
               })}\n\n`);
+              currentTool.bufferedArgs = '';
             }
           }
         }
@@ -785,8 +842,20 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
         if (chunk.usage) usage = chunk.usage;
       }
 
-      // Close the final active block
-      closeActiveBlock();
+      // Close open blocks cleanly
+      if (thinkingOpened) {
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+          type: 'content_block_stop',
+          index: currentBlockIndex++,
+        })}\n\n`);
+      }
+      if (textOpened) {
+        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+          type: 'content_block_stop',
+          index: currentBlockIndex++,
+        })}\n\n`);
+      }
+      closeCurrentTool();
 
       const durationMs = Date.now() - startTime;
       if (!ttfbMs) ttfbMs = durationMs;
@@ -804,7 +873,7 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
       res.write(`event: message_delta\ndata: ${JSON.stringify({
         type: 'message_delta',
         delta: {
-          stop_reason: toolBlocks.size > 0 ? 'tool_use' : finalFinishReason,
+          stop_reason: toolCallCount > 0 ? 'tool_use' : finalFinishReason,
           stop_sequence: null,
         },
         usage: {
@@ -820,7 +889,7 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
       // message_stop
       res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
       res.end();
-      console.log(`[Anthropic ${PORT}] direct stream ${modelInput}, tools=${toolBlocks.size}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
+      console.log(`[Anthropic ${PORT}] direct stream ${modelInput}, tools=${toolCallCount}, TTFB=${ttfbMs}ms, total=${durationMs}ms`);
     } else {
       let fullContent = '';
       let fullReasoning = '';
