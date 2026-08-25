@@ -1765,6 +1765,7 @@ ${anthropicAuthHeader}  -d '{
             const reader = r.body.getReader();
             const dec = new TextDecoder();
             let buf = '';
+            let thinkingBlock = null;
             let textBlock = null;
             let curEvent = '';
             while (true) {
@@ -1781,13 +1782,25 @@ ${anthropicAuthHeader}  -d '{
                   try {
                     const j = JSON.parse(payload);
                     if (j.qoder_perf) serverPerf = j.qoder_perf;
-                    if (curEvent === 'content_block_delta' && j.delta?.text) {
-                      if (clientFirstTokenMs === null) clientFirstTokenMs = Date.now() - startTime;
-                      if (!textBlock) {
-                        textBlock = document.createElement('div');
-                        out.appendChild(textBlock);
+                    if (curEvent === 'content_block_delta') {
+                      if (j.delta?.thinking) {
+                        if (clientFirstTokenMs === null) clientFirstTokenMs = Date.now() - startTime;
+                        if (!thinkingBlock) {
+                          thinkingBlock = document.createElement('div');
+                          thinkingBlock.className = 'thinking-box';
+                          out.appendChild(thinkingBlock);
+                        }
+                        thinkingBlock.textContent += j.delta.thinking;
                       }
-                      textBlock.textContent += j.delta.text;
+                      if (j.delta?.text) {
+                        if (clientFirstTokenMs === null) clientFirstTokenMs = Date.now() - startTime;
+                        if (!textBlock) {
+                          if (thinkingBlock) out.appendChild(document.createTextNode('\n'));
+                          textBlock = document.createElement('div');
+                          out.appendChild(textBlock);
+                        }
+                        textBlock.textContent += j.delta.text;
+                      }
                     }
                   } catch (e) {}
                 }
@@ -1802,9 +1815,13 @@ ${anthropicAuthHeader}  -d '{
             const j = await r.json();
             if (j.error) throw new Error(j.error.message || '请求失败');
             if (j.qoder_perf) serverPerf = j.qoder_perf;
-            const ansText = j.content?.map(c => c.text).join('') || '';
+            const thinkingText = j.content?.filter(c => c.type === 'thinking').map(c => c.thinking).join('') || '';
+            const ansText = j.content?.filter(c => c.type === 'text').map(c => c.text).join('') || '';
             let out1 = `▶ [Anthropic /v1/messages] 模型: ${j.model}\n\n`;
-            out1 += `${ansText}\n\n`;
+            if (thinkingText) {
+              out1 += `💭 深度思考:\n${thinkingText}\n\n`;
+            }
+            out1 += `${ansText || (thinkingText ? '（思考完成）' : '')}\n\n`;
             if (j.usage) out1 += `📊 usage: ${JSON.stringify(j.usage, null, 2)}\n`;
             out.textContent = out1;
           }

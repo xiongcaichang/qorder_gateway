@@ -901,6 +901,9 @@ app.post(['/v1/messages', '/api/v1/messages', '/messages'], verifyApiToken, asyn
           input: parsedArgs,
         });
       }
+      if (content.length === 0) {
+        content.push({ type: 'text', text: fullContent || fullReasoning || '' });
+      }
 
       res.json({
         id: reqId,
